@@ -1,5 +1,7 @@
 # CyDrums SystemCore.bin Wavetable Format Documentation
 
+NOTE: Do not use, this is work in progress.
+
 ## Overview
 
 The `SystemCore.bin` file contains 64 wavetables for the CyDrums Drum Synth. Each wavetable consists of **128 hardware frames** (4,096 samples each) at varying sample rates, stored as 16-bit signed integers (little-endian). The WTFT metadata describes an **SD Card → RAM Load Descriptor**: 16 load chunks of 65,536 bytes each = 1 MB RAM loaded from SD card, then played from RAM by hardware.
