@@ -1,5 +1,7 @@
 # CyDrums SystemCore.bin Wavetable Tools
 
+NOTE: Do not use, this is work in progress.
+
 This repository contains tools for analyzing, extracting, and modifying wavetables in the CyDrums Drum Synth's `SystemCore.bin` file.
 
 ## Files
