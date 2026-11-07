@@ -4,7 +4,7 @@ NOTE: Do not use, this is work in progress.
 
 ## Overview
 
-The `SystemCore.bin` file contains 64 wavetables for the CyDrums Drum Synth. Each wavetable consists of **128 hardware frames** (4,096 samples each) at varying sample rates, stored as 16-bit signed integers (little-endian). The WTFT metadata describes an **SD Card → RAM Load Descriptor**: 16 load chunks of 65,536 bytes each = 1 MB RAM loaded from SD card, then played from RAM by hardware.
+The `SystemCore.bin` file contains 64 wavetables for the CyDrums Drum Synth. Each wavetable consists of **256 hardware frames** (2,048 samples each) at varying sample rates, stored as 16-bit signed integers (little-endian). The WTFT metadata describes an **SD Card → RAM Load Descriptor**: 16 load chunks of 65,536 bytes each = 1 MB RAM loaded from SD card, then played from RAM by hardware.
 
 ## File Structure
 
@@ -18,7 +18,7 @@ SystemCore.bin
 │       ├── 64 × WTFT chunks (format metadata - RAM load descriptors)
 │       └── 64 × WTPL chunks (playlist/offset entries)
 ├── Sample Data (64 MB = 64 × 1,048,576 bytes)
-│   └── 64 wavetables × 1 MB each (524,288 int16 samples = 128 frames × 4,096 samples)
+│   └── 64 wavetables × 1 MB each (524,288 int16 samples = 256 frames × 2,048 samples)
 └── Padding (0xFFFFFFFF fill to file end)
 ```
 
@@ -116,7 +116,7 @@ Offset 20: unk5 (uint32) = 1413764183 (0x54445457 = "WTDT" little-endian)
 Offset 24: unk6 (uint32) = 116 (WTDT size)
 ```
 
-**Data Offsets (relative to sample data start at 0x1CF0):**
+**Data Offsets (relative to sample data start at 0x1E00):**
 ```
 Wavetable 0:  0x00000000
 Wavetable 1:  0x00100000
@@ -129,19 +129,19 @@ Each wavetable is 1 MB (0x100000 bytes) apart.
 
 ## Sample Data
 
-**Starts at file offset:** 0x1CF0 (after WTLS header)
+**Starts at file offset:** 0x1E00 (after WTLS header + 272 bytes / 136 samples of 0xFFFF padding)
 
 **Format:** 16-bit signed integers (int16), little-endian
 
 **Per Wavetable:**
 - Size: 1,048,576 bytes = 524,288 samples
-- **Hardware Frames:** 128 frames × 4,096 samples = 524,288 samples (addressed 0-127 in RAM)
+- **Hardware Frames:** 256 frames × 2,048 samples = 524,288 samples (addressed 0-255 in RAM)
 - **SD Load Chunks:** 16 chunks × 32,768 samples = 524,288 samples (loaded sequentially from SD to RAM)
-- **Frame size:** 4,096 samples (8,192 bytes)
-- **Load chunk size:** 32,768 samples (65,536 bytes = 64KB = 8 hardware frames)
-- Duration per hardware frame at 24kHz: 4096/24000 = 0.171 seconds
-- Duration per hardware frame at 44.1kHz: 4096/44100 = 0.093 seconds
-- Duration per hardware frame at 384kHz: 4096/384000 = 0.011 seconds
+- **Frame size:** 2,048 samples (4,096 bytes)
+- **Load chunk size:** 32,768 samples (65,536 bytes = 64KB = 16 hardware frames)
+- Duration per hardware frame at 24kHz: 2048/24000 = 0.085 seconds
+- Duration per hardware frame at 44.1kHz: 2048/44100 = 0.046 seconds
+- Duration per hardware frame at 384kHz: 2048/384000 = 0.005 seconds
 - Duration per load chunk at 24kHz: 32768/24000 = 1.365 seconds
 - Duration per load chunk at 44.1kHz: 32768/44100 = 0.743 seconds
 - Duration per load chunk at 384kHz: 32768/384000 = 0.085 seconds
@@ -152,13 +152,13 @@ Each wavetable is 1 MB (0x100000 bytes) apart.
 
 | Concept | Count | Size | Purpose |
 |---------|-------|------|---------|
-| **Hardware Frames** | 128 | 4,096 samples | Direct hardware addressing (0-127 in RAM) |
+| **Hardware Frames** | 256 | 2,048 samples | Direct hardware addressing (0-255 in RAM) |
 | **SD Load Chunks (WTFT)** | 16 | 32,768 samples | SD→RAM DMA transfer units (64KB each) |
 | **Acoustic Waveform Cycles** | Varies (256 - 130,000+) | Varies | Actual waveform periods in the audio content |
 
 **Relationship:**
-- 1 SD load chunk = 8 hardware frames (32,768 / 4,096 = 8)
-- 16 load chunks × 8 = 128 hardware frames
+- 1 SD load chunk = 16 hardware frames (32,768 / 2,048 = 16)
+- 16 load chunks × 16 = 256 hardware frames
 - Acoustic cycles vary per wavetable content
 
 ### Actual Acoustic Waveform Cycles (Content-Dependent)
@@ -182,26 +182,34 @@ The "16 load chunks" in WTFT metadata refers to **SD→RAM DMA transfer units**,
 ### Frame/Chunk Structure
 
 ```
-Wavetable (524,288 samples = 128 hardware frames = 16 load chunks)
-├── Load Chunk 0 (32,768 samples = 8 hardware frames) ──► SD DMA transfer #0
-│   ├── Hardware Frame 0 (4,096 samples)
-│   ├── Hardware Frame 1 (4,096 samples)
-│   ├── Hardware Frame 2 (4,096 samples)
-│   ├── Hardware Frame 3 (4,096 samples)
-│   ├── Hardware Frame 4 (4,096 samples)
-│   ├── Hardware Frame 5 (4,096 samples)
-│   ├── Hardware Frame 6 (4,096 samples)
-│   └── Hardware Frame 7 (4,096 samples)
-├── Load Chunk 1 (32,768 samples = 8 hardware frames) ──► SD DMA transfer #1
-│   ├── Hardware Frame 8
-│   └── ... Hardware Frame 15
+Wavetable (524,288 samples = 256 hardware frames = 16 load chunks)
+├── Load Chunk 0 (32,768 samples = 16 hardware frames) ──► SD DMA transfer #0
+│   ├── Hardware Frame 0 (2,048 samples)
+│   ├── Hardware Frame 1 (2,048 samples)
+│   ├── Hardware Frame 2 (2,048 samples)
+│   ├── Hardware Frame 3 (2,048 samples)
+│   ├── Hardware Frame 4 (2,048 samples)
+│   ├── Hardware Frame 5 (2,048 samples)
+│   ├── Hardware Frame 6 (2,048 samples)
+│   ├── Hardware Frame 7 (2,048 samples)
+│   ├── Hardware Frame 8 (2,048 samples)
+│   ├── Hardware Frame 9 (2,048 samples)
+│   ├── Hardware Frame 10 (2,048 samples)
+│   ├── Hardware Frame 11 (2,048 samples)
+│   ├── Hardware Frame 12 (2,048 samples)
+│   ├── Hardware Frame 13 (2,048 samples)
+│   ├── Hardware Frame 14 (2,048 samples)
+│   └── Hardware Frame 15 (2,048 samples)
+├── Load Chunk 1 (32,768 samples = 16 hardware frames) ──► SD DMA transfer #1
+│   ├── Hardware Frame 16
+│   └── ... Hardware Frame 31
 ├── ...
-└── Load Chunk 15 (32,768 samples = 8 hardware frames) ──► SD DMA transfer #15
-    ├── Hardware Frame 120
-    └── ... Hardware Frame 127
+└── Load Chunk 15 (32,768 samples = 16 hardware frames) ──► SD DMA transfer #15
+    ├── Hardware Frame 240
+    └── ... Hardware Frame 255
 ```
 
-Each hardware frame contains many acoustic waveform cycles. The synth plays directly from RAM using hardware addresses 0-127. The 16 load chunks are only for SD→RAM transfer at boot/load time.
+Each hardware frame contains many acoustic waveform cycles. The synth plays directly from RAM using hardware addresses 0-255. The 16 load chunks are only for SD→RAM transfer at boot/load time.
 
 ## WTDT - Nested Wavetable Data Table (32 entries)
 
@@ -234,7 +242,7 @@ python3 cydrums_wavetable_tools.py SystemCore.bin --list
 python3 cydrums_wavetable_tools.py SystemCore.bin --extract-wav output_wavs/
 ```
 
-### Extract All Hardware Frames (128 per wavetable)
+### Extract All Hardware Frames (256 per wavetable)
 
 ```bash
 python3 cydrums_wavetable_tools.py SystemCore.bin --extract-frames output_frames/
@@ -335,10 +343,10 @@ extractor.save("SystemCore_custom.bin")
 ### Accessing Individual Frames/Chunks
 
 ```python
-# Get all 128 hardware frames (4096 samples each, addressed 0-127 in RAM)
-frames = extractor.get_frames(0)  # List of 128 arrays
+# Get all 256 hardware frames (2048 samples each, addressed 0-255 in RAM)
+frames = extractor.get_frames(0)  # List of 256 arrays
 
-# Get single hardware frame (0-127)
+# Get single hardware frame (0-255)
 frame_5 = extractor.get_frame(0, 5)
 
 # Get all 16 SD load chunks (32768 samples each)
@@ -358,17 +366,17 @@ import struct
 with open("SystemCore.bin", "rb") as f:
     data = f.read()
 
-# Skip WTLS header (8 + 7400 = 0x1CF0)
-sample_start = 0x1CF0
+# Skip WTLS header (8 + 7400 = 0x1CF0, but actual sample data starts at 0x1E00)
+sample_start = 0x1E00
 
 # Wavetable index i is at:
 offset = sample_start + i * 0x100000
 wavetable_data = data[offset:offset + 0x100000]
 samples = struct.unpack('<' + 'h' * 524288, wavetable_data)
 
-# Get hardware frame f (0-127):
-frame_start = f * 4096
-frame = samples[frame_start:frame_start + 4096]
+# Get hardware frame f (0-255):
+frame_start = f * 2048
+frame = samples[frame_start:frame_start + 2048]
 
 # Get SD load chunk c (0-15):
 chunk_start = c * 32768
@@ -388,7 +396,7 @@ new_bytes = struct.pack('<' + 'h' * 524288, *new_samples)
 
 # Write at correct offset
 with open("SystemCore.bin", "r+b") as f:
-    f.seek(0x1CF0 + i * 0x100000)
+    f.seek(0x1E00 + i * 0x100000)
     f.write(new_bytes)
 
 # Also update WTFT sample rate if changed
@@ -408,13 +416,13 @@ f.write(new_name.encode('ascii').ljust(12, b'\x00')[:12])
 |-----------|-------------|------|
 | WTLS Header | 0x00000000 | 8 bytes |
 | WTLS Data | 0x00000008 | 7,400 bytes |
-| Sample Data Start | 0x00001CF0 | - |
-| Wavetable 0 | 0x00001CF0 | 1,048,576 bytes |
-| Wavetable 1 | 0x00101CF0 | 1,048,576 bytes |
+| Sample Data Start | 0x00001E00 | - |
+| Wavetable 0 | 0x00001E00 | 1,048,576 bytes |
+| Wavetable 1 | 0x00101E00 | 1,048,576 bytes |
 | ... | ... | ... |
-| Wavetable 63 | 0x03F01CF0 | 1,048,576 bytes |
-| End of Samples | 0x04001CF0 | - |
-| Padding | 0x04001CF0+ | to EOF |
+| Wavetable 63 | 0x03F01E00 | 1,048,576 bytes |
+| End of Samples | 0x04001E00 | - |
+| Padding | 0x04001E00+ | to EOF |
 
 ## Notes
 
@@ -423,7 +431,7 @@ f.write(new_name.encode('ascii').ljust(12, b'\x00')[:12])
 3. Some names are truncated in the nested WTDT chunks (only 32 WTDT entries exist)
 4. The nested WTDT chunks appear to be a legacy/redundant structure
 5. Padding between sample data and EOF is filled with 0xFFFFFFFF
-6. **Hardware frames (128) are the native RAM addressing unit (0-127). SD Load chunks (16) are for DMA transfer from SD card to RAM at load time. They are related: 1 load chunk = 8 hardware frames = 64KB.**
+6. **Hardware frames (256) are the native RAM addressing unit (0-255). SD Load chunks (16) are for DMA transfer from SD card to RAM at load time. They are related: 1 load chunk = 16 hardware frames = 64KB.**
 7. The SD card is too slow for random access streaming; all data is loaded to RAM first.
 8. Bit depth (16-bit) is an implicit format constant, not stored in the file.
 

@@ -12,7 +12,7 @@ File Format (SD Card → RAM Load Descriptor):
 - Each wavetable: 1MB on SD = 16 load chunks × 64KB = 1MB RAM
 - WTFT describes SD→RAM loading: 16 chunks of 65536 bytes each
 - Hardware loads all 16 chunks sequentially from SD to RAM, then plays from RAM
-- Hardware addresses 0-127 map directly to 128 frames × 4096 samples in RAM
+- Hardware addresses 0-255 map directly to 256 frames × 2048 samples in RAM
 - Total sample data on SD: 64 MB
 """
 
@@ -34,7 +34,9 @@ class SimpleWavetableExtractor:
 
         wtls_size = struct.unpack('<I', self.data[4:8])[0]
         self.wtls_data = self.data[8:8+wtls_size]
-        self.sample_start = 8 + wtls_size  # 0x1CF0
+        # WTLS ends at 0x1CF0, but sample data actually starts at 0x1E00 (272 bytes / 136 samples later)
+        # The WTPL offsets are relative to the actual sample data start
+        self.sample_start = 0x1E00
 
         # Parse names (64 WTNM entries)
         self.names = []
@@ -67,9 +69,9 @@ class SimpleWavetableExtractor:
                         'sample_rate': sample_rate,        # Playback rate after loading to RAM
                         'ram_size': ram_size,              # 1048576 bytes = 1MB RAM needed
                         # Derived (RAM layout after loading):
-                        'num_frames': 128,                 # Hardware frames (0-127) in RAM
-                        'frame_len': 4096,                 # Samples per hardware frame
-                        'frames_per_chunk': 8,             # 32768 / 4096 = 8 frames per chunk
+                        'num_frames': 256,                 # Hardware frames (0-255) in RAM
+                        'frame_len': 2048,                 # Samples per hardware frame
+                        'frames_per_chunk': 16,            # 32768 / 2048 = 16 frames per chunk
                         'samples_per_chunk': chunk_size // 2,  # 32768 samples per chunk
                     })
                 pos += 8 + size
@@ -108,12 +110,12 @@ class SimpleWavetableExtractor:
         return struct.unpack('<' + 'h' * (d['ram_size'] // 2), wav_data)
 
     def get_frames(self, index):
-        """Split wavetable into 128 hardware frames (4096 samples each, addressed 0-127 in RAM)"""
+        """Split wavetable into 256 hardware frames (2048 samples each, addressed 0-127 in RAM)"""
         samples = self.get_wavetable_samples(index)
         d = self.load_descriptors[index]
-        frame_len = d['frame_len']  # 4096
+        frame_len = d['frame_len']  # 2048
         frames = []
-        for frame_idx in range(d['num_frames']):  # 128
+        for frame_idx in range(d['num_frames']):  # 256
             start = frame_idx * frame_len
             end = start + frame_len
             frames.append(list(samples[start:end]))
@@ -133,7 +135,7 @@ class SimpleWavetableExtractor:
 
     def get_frame(self, index, frame_idx):
         """Get a single hardware frame (0-127) from RAM layout"""
-        if frame_idx < 0 or frame_idx >= 128:
+        if frame_idx < 0 or frame_idx >= 256:
             raise ValueError("Frame index must be 0-127")
         frames = self.get_frames(index)
         return frames[frame_idx]
@@ -160,8 +162,8 @@ class SimpleWavetableExtractor:
         return {
             'acoustic_cycles': acoustic_cycles,
             'samples_per_acoustic_cycle': samples_per_cycle,
-            'hardware_frames': d['num_frames'],           # 128
-            'samples_per_frame': d['frame_len'],          # 4096
+            'hardware_frames': d['num_frames'],           # 256
+            'samples_per_frame': d['frame_len'],          # 2048
             'load_chunks': d['load_chunks'],              # 16
             'samples_per_chunk': d['samples_per_chunk'],  # 32768
             'acoustic_cycles_per_frame': acoustic_cycles / d['num_frames'],
@@ -187,18 +189,20 @@ class SimpleWavetableExtractor:
             self.extract_wav(i, out_dir)
 
     def extract_frames_wav(self, index, out_dir):
-        """Extract all 128 hardware frames as separate WAV files (RAM layout)"""
-        os.makedirs(out_dir, exist_ok=True)
+        """Extract all 256 hardware frames as separate WAV files (RAM layout)"""
+        wt_name = self.names[index].replace(' ', '_').replace('/', '_')
+        wt_dir = os.path.join(out_dir, f"{index:02d}_{wt_name}")
+        os.makedirs(wt_dir, exist_ok=True)
         d = self.load_descriptors[index]
         frames = self.get_frames(index)
         for frame_idx, frame in enumerate(frames):
-            out_path = os.path.join(out_dir, f"{index:02d}_{self.names[index]}_frame{frame_idx:03d}.wav")
+            out_path = os.path.join(wt_dir, f"frame{frame_idx:03d}.wav")
             with wave.open(out_path, 'wb') as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(d['sample_rate'])
                 wf.writeframes(struct.pack('<' + 'h' * len(frame), *frame))
-        print(f"Saved {len(frames)} frames to {out_dir}")
+        print(f"Saved {len(frames)} frames to {wt_dir}")
 
     def extract_load_chunks_wav(self, index, out_dir):
         """Extract 16 SD load chunks as separate WAV files"""
@@ -215,38 +219,59 @@ class SimpleWavetableExtractor:
         print(f"Saved {len(chunks)} load chunks to {out_dir}")
 
     def extract_all_frames(self, out_dir):
-        """Extract all 64 wavetables as 128 hardware frames each"""
+        """Extract all 64 wavetables as 256 hardware frames each (subfolder per wavetable)"""
         os.makedirs(out_dir, exist_ok=True)
         total = 0
         for i in range(64):
+            wt_name = self.names[i].replace(' ', '_').replace('/', '_')
+            wt_dir = os.path.join(out_dir, f"{i:02d}_{wt_name}")
+            os.makedirs(wt_dir, exist_ok=True)
             d = self.load_descriptors[i]
             frames = self.get_frames(i)
             for frame_idx, frame in enumerate(frames):
-                out_path = os.path.join(out_dir, f"{i:02d}_{self.names[i]}_frame{frame_idx:03d}.wav")
+                out_path = os.path.join(wt_dir, f"frame{frame_idx:03d}.wav")
                 with wave.open(out_path, 'wb') as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)
                     wf.setframerate(d['sample_rate'])
                     wf.writeframes(struct.pack('<' + 'h' * len(frame), *frame))
             total += len(frames)
-        print(f"Saved {total} frames (64 wavetables × 128 frames) to {out_dir}")
+        print(f"Saved {total} frames (64 wavetables × 256 frames) to {out_dir}/")
 
     def extract_all_load_chunks(self, out_dir):
-        """Extract all 64 wavetables as 16 load chunks each"""
+        """Extract all 64 wavetables as 16 load chunks each (subfolder per wavetable)"""
         os.makedirs(out_dir, exist_ok=True)
         total = 0
         for i in range(64):
+            wt_name = self.names[i].replace(' ', '_').replace('/', '_')
+            wt_dir = os.path.join(out_dir, f"{i:02d}_{wt_name}")
+            os.makedirs(wt_dir, exist_ok=True)
             d = self.load_descriptors[i]
             chunks = self.get_load_chunks(i)
             for c, chunk in enumerate(chunks):
-                out_path = os.path.join(out_dir, f"{i:02d}_{self.names[i]}_chunk{c:02d}.wav")
+                out_path = os.path.join(wt_dir, f"chunk{c:02d}.wav")
                 with wave.open(out_path, 'wb') as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)
                     wf.setframerate(d['sample_rate'])
                     wf.writeframes(struct.pack('<' + 'h' * len(chunk), *chunk))
             total += len(chunks)
-        print(f"Saved {total} load chunks (64 wavetables × 16 chunks) to {out_dir}")
+        print(f"Saved {total} load chunks (64 wavetables × 16 chunks) to {out_dir}/")
+
+    def extract_raw(self, index, out_dir):
+        """Extract single wavetable as raw int16 binary file"""
+        os.makedirs(out_dir, exist_ok=True)
+        d = self.load_descriptors[index]
+        samples = self.get_wavetable_samples(index)
+        out_path = os.path.join(out_dir, f"{index:02d}_{self.names[index]}.raw")
+        with open(out_path, 'wb') as f:
+            f.write(struct.pack('<' + 'h' * len(samples), *samples))
+        print(f"Saved: {out_path}")
+
+    def extract_all_raw(self, out_dir):
+        """Extract all as raw binary files"""
+        for i in range(64):
+            self.extract_raw(i, out_dir)
 
     def load_wav(self, wav_path):
         """Load WAV file, return (samples_list, sample_rate)"""
@@ -368,6 +393,7 @@ def main():
         print("  python3 cydrums_simple.py SystemCore.bin --extract-wav out_dir")
         print("  python3 cydrums_simple.py SystemCore.bin --extract-frames out_dir")
         print("  python3 cydrums_simple.py SystemCore.bin --extract-chunks out_dir")
+        print("  python3 cydrums_simple.py SystemCore.bin --extract-raw out_dir")
         print("  python3 cydrums_simple.py SystemCore.bin --generate-sine --index 0 --output SystemCore_new.bin")
         print("  python3 cydrums_simple.py SystemCore.bin --update-wav 0 input.wav --name NewName --output SystemCore_new.bin")
         return
@@ -392,6 +418,11 @@ def main():
         idx = sys.argv.index('--extract-chunks')
         if idx + 1 < len(sys.argv):
             extractor.extract_all_load_chunks(sys.argv[idx + 1])
+
+    if '--extract-raw' in sys.argv:
+        idx = sys.argv.index('--extract-raw')
+        if idx + 1 < len(sys.argv):
+            extractor.extract_all_raw(sys.argv[idx + 1])
 
     if '--info' in sys.argv:
         idx = sys.argv.index('--info')

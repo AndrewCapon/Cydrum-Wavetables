@@ -5,3 +5,7 @@ notes.txt
 SystemCore.bin
 .DS_Store
 transcript.txt
+sononym.db
+sononym.db.wal
+1IC001.wav
+__pycache__/cydrums_simple.cpython-312.pyc

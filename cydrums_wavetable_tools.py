@@ -12,7 +12,7 @@ File Format (SD Card → RAM Load Descriptor):
 - Each wavetable: 1MB on SD = 16 load chunks × 64KB = 1MB RAM
 - WTFT describes SD→RAM loading: 16 chunks of 65536 bytes each
 - Hardware loads all 16 chunks sequentially from SD to RAM, then plays from RAM
-- Hardware addresses 0-127 map directly to 128 frames × 4096 samples in RAM
+- Hardware addresses 0-255 map directly to 256 frames × 2048 samples in RAM
 - Total sample data on SD: 64 MB
 """
 
@@ -35,9 +35,9 @@ class WavetableInfo:
     data_offset: int
     file_offset: int
     # Derived (RAM layout after loading):
-    num_frames: int = 128      # Hardware frames (0-127)
-    frame_len: int = 4096      # Samples per hardware frame
-    frames_per_chunk: int = 8  # 32768 / 4096 = 8 frames per chunk
+    num_frames: int = 256      # Hardware frames (0-255) in RAM
+    frame_len: int = 2048      # Samples per hardware frame
+    frames_per_chunk: int = 16 # 32768 / 2048 = 16 frames per chunk
     samples_per_chunk: int = 32768  # chunk_size // 2
 
 class CyDrumsWavetableExtractor:
@@ -57,7 +57,9 @@ class CyDrumsWavetableExtractor:
 
         wtls_size = struct.unpack('<I', self.data[4:8])[0]
         self.wtls_data = self.data[8:8+wtls_size]
-        self.sample_start = 8 + wtls_size  # 0x1cf0
+        # WTLS ends at 0x1CF0, but sample data actually starts at 0x1E00 (272 bytes / 136 samples later)
+        # The WTPL offsets are relative to the actual sample data start
+        self.sample_start = 0x1E00
 
         # Parse WTNM entries (64 names)
         names = []
@@ -124,7 +126,12 @@ class CyDrumsWavetableExtractor:
                     chunk_size=d['chunk_size'],
                     ram_size=d['ram_size'],
                     data_offset=offset,
-                    file_offset=self.sample_start + offset
+                    file_offset=self.sample_start + offset,
+                    # Derived (RAM layout after loading):
+                    num_frames=256,                 # Hardware frames (0-255) in RAM
+                    frame_len=2048,                 # Samples per hardware frame
+                    frames_per_chunk=16,            # 32768 / 2048 = 16 frames per chunk
+                    samples_per_chunk=d['chunk_size'] // 2,  # 32768 samples per chunk
                 ))
 
     def get_wavetable_data(self, index: int) -> np.ndarray:
@@ -135,7 +142,7 @@ class CyDrumsWavetableExtractor:
         return samples
 
     def get_frames(self, index: int) -> List[np.ndarray]:
-        """Split wavetable into 128 hardware frames (4096 samples each, addressed 0-127 in RAM)"""
+        """Split wavetable into 256 hardware frames (2048 samples each, addressed 0-255 in RAM)"""
         samples = self.get_wavetable_data(index)
         wt = self.wavetables[index]
         frames = []
@@ -147,9 +154,9 @@ class CyDrumsWavetableExtractor:
         return frames
 
     def get_frame(self, index: int, frame_idx: int) -> np.ndarray:
-        """Get a single hardware frame (0-127) from RAM layout"""
-        if frame_idx < 0 or frame_idx >= 128:
-            raise ValueError("Frame index must be 0-127")
+        """Get a single hardware frame (0-255) from RAM layout"""
+        if frame_idx < 0 or frame_idx >= 256:
+            raise ValueError("Frame index must be 0-255")
         frames = self.get_frames(index)
         return frames[frame_idx]
 
@@ -211,21 +218,26 @@ class CyDrumsWavetableExtractor:
                                separate_chunks: bool = False):
         """Extract wavetable as WAV file(s)"""
         wt = self.wavetables[index]
-        os.makedirs(output_dir, exist_ok=True)
+        wt_name = wt.name.replace(' ', '_').replace('/', '_')
 
         if separate_frames:
+            wt_dir = os.path.join(output_dir, f"{wt.index:02d}_{wt_name}")
+            os.makedirs(wt_dir, exist_ok=True)
             frames = self.get_frames(index)
             for f, frame in enumerate(frames):
-                out_path = os.path.join(output_dir, f"{wt.index:02d}_{wt.name}_frame{f:03d}.wav")
+                out_path = os.path.join(wt_dir, f"frame{f:03d}.wav")
                 self._write_wav(out_path, frame, wt.sample_rate)
-            print(f"Extracted {wt.name} as {len(frames)} hardware frames to {output_dir}")
+            print(f"Extracted {wt.name} as {len(frames)} hardware frames to {wt_dir}")
         elif separate_chunks:
+            wt_dir = os.path.join(output_dir, f"{wt.index:02d}_{wt_name}")
+            os.makedirs(wt_dir, exist_ok=True)
             chunks = self.get_load_chunks(index)
             for c, chunk in enumerate(chunks):
-                out_path = os.path.join(output_dir, f"{wt.index:02d}_{wt.name}_chunk{c:02d}.wav")
+                out_path = os.path.join(wt_dir, f"chunk{c:02d}.wav")
                 self._write_wav(out_path, chunk, wt.sample_rate)
-            print(f"Extracted {wt.name} as {len(chunks)} load chunks to {output_dir}")
+            print(f"Extracted {wt.name} as {len(chunks)} load chunks to {wt_dir}")
         else:
+            os.makedirs(output_dir, exist_ok=True)
             samples = self.get_wavetable_data(index)
             out_path = os.path.join(output_dir, f"{wt.index:02d}_{wt.name}.wav")
             self._write_wav(out_path, samples, wt.sample_rate)
@@ -402,7 +414,7 @@ def main():
     parser.add_argument('--list', action='store_true', help='List all wavetables')
     parser.add_argument('--extract-raw', metavar='DIR', help='Extract all as raw files')
     parser.add_argument('--extract-wav', metavar='DIR', help='Extract all as WAV files')
-    parser.add_argument('--extract-frames', metavar='DIR', help='Extract all hardware frames (128 per wavetable) as WAVs')
+    parser.add_argument('--extract-frames', metavar='DIR', help='Extract all hardware frames (256 per wavetable) as WAVs')
     parser.add_argument('--extract-chunks', metavar='DIR', help='Extract all load chunks (16 per wavetable) as WAVs')
     parser.add_argument('--info', type=int, help='Show detailed info for wavetable index')
     parser.add_argument('--update', type=int, help='Update wavetable index with WAV file')

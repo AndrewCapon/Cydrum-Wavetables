@@ -22,7 +22,7 @@ python3 cydrums_simple.py SystemCore.bin --list
 # Extract all as WAV files (full wavetables)
 python3 cydrums_simple.py SystemCore.bin --extract-wav my_wavetables/
 
-# Extract all 128 hardware frames per wavetable as separate WAVs
+# Extract all 256 hardware frames per wavetable as separate WAVs
 python3 cydrums_simple.py SystemCore.bin --extract-frames my_frames/
 
 # Extract all 16 SD load chunks per wavetable as separate WAVs
@@ -58,11 +58,11 @@ python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav -
 ## Technical Details
 
 - **Each wavetable**: 1 MB = 524,288 int16 samples
-- **Hardware Frames**: 128 frames × 4,096 samples (addressed 0-127 directly by hardware in RAM)
+- **Hardware Frames**: 256 frames × 2,048 samples (addressed 0-255 directly by hardware in RAM)
 - **SD Load Chunks (WTFT)**: 16 chunks × 32,768 samples = 64KB each (SD→RAM DMA transfer units)
-- **Relationship**: 1 load chunk = 8 hardware frames
+- **Relationship**: 1 load chunk = 16 hardware frames
 - **Actual acoustic cycles**: Varies per wavetable (256 for clean tones, up to 130,000+ for noise)
-- **Sample data starts at**: File offset 0x1CF0 (after 7,400-byte WTLS header)
+- **Sample data starts at**: File offset 0x1E00 (after 7,400-byte WTLS header + 272 bytes padding)
 - **Wavetable spacing**: 0x100000 bytes (1 MB) apart
 - **Total sample data**: 64 MB
 - **Format**: Little-endian int16 (2 bytes per sample)
@@ -71,7 +71,7 @@ python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav -
 
 | Concept | Count | Size | Purpose |
 |---------|-------|------|---------|
-| **Hardware Frames** | 128 | 4,096 samples | Direct hardware addressing (0-127 in RAM) |
+| **Hardware Frames** | 256 | 2,048 samples | Direct hardware addressing (0-255 in RAM) |
 | **SD Load Chunks (WTFT)** | 16 | 32,768 samples | SD→RAM DMA transfer units (64KB each) |
 | **Acoustic Waveform Cycles** | Varies | Varies | Actual waveform periods in audio |
 
@@ -81,7 +81,7 @@ python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav -
 
 ```bash
 # WAV must be: Mono, 16-bit
-# Will be resized to 524,288 samples (16 load chunks × 32,768 = 128 hardware frames × 4,096)
+# Will be resized to 524,288 samples (16 load chunks × 32,768 = 256 hardware frames × 2,048)
 python3 cydrums_simple.py SystemCore.bin --update-wav 10 --wav my_sound.wav --name "CustomSine" --output SystemCore_new.bin
 ```
 
@@ -97,7 +97,7 @@ samples = generate_sine_wavetable(sample_rate=44100, load_chunks=16, chunk_size=
 
 # Option 2: Load from WAV
 samples, sr = extractor.load_wav("my_wavetable.wav")
-# Resize to exactly 524288 samples
+# Resize to exactly 524,288 samples
 expected = 524288
 if len(samples) < expected:
     samples = samples + [0] * (expected - len(samples))
@@ -109,8 +109,8 @@ extractor.update_wavetable(0, samples, new_name="MyCustom", new_sr=44100)
 extractor.save("SystemCore_custom.bin")
 
 # Access individual frames/chunks
-frames = extractor.get_frames(0)        # All 128 hardware frames
-frame_5 = extractor.get_frame(0, 5)     # Single hardware frame (0-127)
+frames = extractor.get_frames(0)        # All 256 hardware frames
+frame_5 = extractor.get_frame(0, 5)     # Single hardware frame (0-255)
 chunks = extractor.get_load_chunks(0)   # All 16 SD load chunks
 chunk_3 = extractor.get_load_chunk(0, 3)  # Single load chunk (0-15)
 ```
@@ -150,9 +150,9 @@ SystemCore.bin
 │   ├── 64 × WTNM (names)
 │   ├── 64 × WTFT (format: sample rate, load_chunks, chunk_size, ram_size)
 │   └── 64 × WTPL (offsets into sample data)
-├── Sample Data (0x00001CF0 - 0x04001CF0)
-│   ├── Wavetable 0: 0x00001CF0 - 0x00101CF0 (1 MB)
-│   ├── Wavetable 1: 0x00101CF0 - 0x00201CF0 (1 MB)
+├── Sample Data (0x00001E00 - 0x04001E00)
+│   ├── Wavetable 0: 0x00001E00 - 0x00101E00 (1 MB)
+│   ├── Wavetable 1: 0x00101E00 - 0x00201E00 (1 MB)
 │   └── ... (64 total)
 └── Padding (0xFFFFFFFF to EOF)
 ```
