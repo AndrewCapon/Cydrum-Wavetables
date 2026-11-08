@@ -1,6 +1,8 @@
 # CyDrums SystemCore.bin Wavetable Format Documentation
 
-NOTE: Do not use, this is work in progress.
+Before using any of this take a full backup of your sdcard, definately make sure you have a backup or two of SystemCore.bin somewhere as I have no idea of how you would get the original back.
+
+I take absolutely no responsibility for any damage caused by using these tools.
 
 ## Overview
 
