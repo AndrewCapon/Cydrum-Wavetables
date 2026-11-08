@@ -285,6 +285,102 @@ class SimpleWavetableExtractor:
             samples = struct.unpack('<' + 'h' * wf.getnframes(), frames)
         return list(samples), sr
 
+    def load_wav_to_frame(self, wav_path, target_samples=2048):
+        """
+        Load WAV file and convert to exactly target_samples (default 2048 for one frame).
+        - Mixes stereo to mono
+        - Converts to 16-bit if needed
+        - Resamples to target_samples if needed
+        Returns (samples_list, original_sample_rate)
+        """
+        with wave.open(wav_path, 'rb') as wf:
+            nchannels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            sr = wf.getframerate()
+            nframes = wf.getnframes()
+            frames = wf.readframes(nframes)
+
+            if sampwidth == 1:
+                # 8-bit unsigned to 16-bit signed
+                samples = struct.unpack('<' + 'B' * nframes * nchannels, frames)
+                samples = [(s - 128) * 256 for s in samples]
+            elif sampwidth == 2:
+                samples = struct.unpack('<' + 'h' * nframes * nchannels, frames)
+            elif sampwidth == 3:
+                # 24-bit - read as bytes and convert
+                raw = list(frames)
+                samples = []
+                for i in range(0, len(raw), 3):
+                    if i + 2 < len(raw):
+                        # Little-endian 24-bit to 16-bit
+                        val = raw[i] | (raw[i+1] << 8) | (raw[i+2] << 16)
+                        if val & 0x800000:
+                            val -= 0x1000000
+                        samples.append(val >> 8)
+            elif sampwidth == 4:
+                samples = struct.unpack('<' + 'i' * nframes * nchannels, frames)
+                # Convert 32-bit to 16-bit
+                samples = [int(s / 65536) for s in samples]
+            else:
+                raise ValueError(f"Unsupported sample width: {sampwidth}")
+
+            # Mix stereo to mono if needed
+            if nchannels == 2:
+                mono_samples = []
+                for i in range(0, len(samples), 2):
+                    if i + 1 < len(samples):
+                        mono_samples.append((samples[i] + samples[i+1]) // 2)
+                    else:
+                        mono_samples.append(samples[i])
+                samples = mono_samples
+            elif nchannels > 2:
+                # Mix all channels to mono
+                mono_samples = []
+                for i in range(0, len(samples), nchannels):
+                    chunk = samples[i:i+nchannels]
+                    mono_samples.append(sum(chunk) // len(chunk))
+                samples = mono_samples
+
+            # Resample to target_samples using simple linear interpolation
+            if len(samples) != target_samples:
+                if len(samples) == 0:
+                    samples = [0] * target_samples
+                else:
+                    ratio = len(samples) / target_samples
+                    resampled = []
+                    for i in range(target_samples):
+                        src_idx = i * ratio
+                        idx_floor = int(src_idx)
+                        idx_ceil = min(idx_floor + 1, len(samples) - 1)
+                        frac = src_idx - idx_floor
+                        val = samples[idx_floor] * (1 - frac) + samples[idx_ceil] * frac
+                        resampled.append(int(val))
+                    samples = resampled
+
+        return samples, sr
+
+    def update_frame(self, wavetable_index, frame_index, new_frame_samples):
+        """
+        Update a single hardware frame (0-255) in a wavetable.
+        Does not modify WTFT metadata.
+        """
+        if wavetable_index < 0 or wavetable_index >= 64:
+            raise ValueError("Wavetable index must be 0-63")
+        if frame_index < 0 or frame_index >= 256:
+            raise ValueError("Frame index must be 0-255")
+
+        d = self.load_descriptors[wavetable_index]
+        frame_len = d['frame_len']  # 2048
+
+        if len(new_frame_samples) != frame_len:
+            raise ValueError(f"Expected {frame_len} samples for frame, got {len(new_frame_samples)}")
+
+        # Calculate the offset in the file for this frame
+        offset = self.offsets[wavetable_index]
+        start = self.sample_start + offset + frame_index * frame_len * 2  # *2 for bytes
+        new_bytes = struct.pack('<' + 'h' * frame_len, *new_frame_samples)
+        self.data[start:start + frame_len * 2] = new_bytes
+
     def update_wavetable(self, index, new_samples, new_name=None, new_sr=None):
         """Update wavetable in memory (on SD card layout)"""
         if index < 0 or index >= 64:
@@ -396,6 +492,7 @@ def main():
         print("  python3 cydrums_simple.py SystemCore.bin --extract-raw out_dir")
         print("  python3 cydrums_simple.py SystemCore.bin --generate-sine --index 0 --output SystemCore_new.bin")
         print("  python3 cydrums_simple.py SystemCore.bin --update-wav 0 input.wav --name NewName --output SystemCore_new.bin [--sample-rate 24000|44100|384000]")
+        print("  python3 cydrums_simple.py SystemCore.bin --update-frame 0 5 input.wav --output SystemCore_new.bin")
         return
 
     bin_file = sys.argv[1]
@@ -512,6 +609,30 @@ def main():
                 extractor.save(output_file)
             else:
                 print("Error: --wav required for --update-wav")
+
+    if '--update-frame' in sys.argv:
+        idx = sys.argv.index('--update-frame')
+        if idx + 2 < len(sys.argv):
+            wavetable_index = int(sys.argv[idx + 1])
+            frame_index = int(sys.argv[idx + 2])
+            wav_file = None
+            if '--wav' in sys.argv:
+                w_idx = sys.argv.index('--wav')
+                wav_file = sys.argv[w_idx + 1]
+            output_file = 'SystemCore_modified.bin'
+            if '--output' in sys.argv:
+                o_idx = sys.argv.index('--output')
+                output_file = sys.argv[o_idx + 1]
+
+            if wav_file:
+                print(f"Loading {wav_file} for wavetable {wavetable_index}, frame {frame_index}...")
+                samples, file_sr = extractor.load_wav_to_frame(wav_file, target_samples=2048)
+                print(f"  Converted to 2048 samples (original rate: {file_sr} Hz)")
+                extractor.update_frame(wavetable_index, frame_index, samples)
+                extractor.save(output_file)
+                print(f"  Updated frame {frame_index} of wavetable {wavetable_index} ({extractor.names[wavetable_index]})")
+            else:
+                print("Error: --wav required for --update-frame")
 
 
 if __name__ == '__main__':

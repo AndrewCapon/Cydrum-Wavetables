@@ -405,6 +405,88 @@ class CyDrumsWavetableExtractor:
         """
         raise NotImplementedError("Use update_wavetable() and save() instead")
 
+    def load_wav_to_frame(self, wav_path: str, target_samples: int = 2048) -> Tuple[np.ndarray, int]:
+        """
+        Load WAV file and convert to exactly target_samples (default 2048 for one frame).
+        - Mixes stereo to mono
+        - Converts to 16-bit if needed
+        - Resamples to target_samples if needed
+        Returns (samples_array, original_sample_rate)
+        """
+        with wave.open(wav_path, 'rb') as wf:
+            nchannels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            sr = wf.getframerate()
+            nframes = wf.getnframes()
+            frames = wf.readframes(nframes)
+
+            if sampwidth == 1:
+                # 8-bit unsigned to 16-bit signed
+                samples = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+                samples = (samples - 128) * 256
+            elif sampwidth == 2:
+                samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+            elif sampwidth == 3:
+                # 24-bit - read as bytes and convert
+                raw = np.frombuffer(frames, dtype=np.uint8)
+                samples = []
+                for i in range(0, len(raw), 3):
+                    if i + 2 < len(raw):
+                        val = raw[i] | (raw[i+1] << 8) | (raw[i+2] << 16)
+                        if val & 0x800000:
+                            val -= 0x1000000
+                        samples.append(val >> 8)
+                samples = np.array(samples, dtype=np.float32)
+            elif sampwidth == 4:
+                samples = np.frombuffer(frames, dtype=np.int32).astype(np.float32)
+                samples = samples / 65536
+            else:
+                raise ValueError(f"Unsupported sample width: {sampwidth}")
+
+            # Reshape for channels
+            samples = samples.reshape(-1, nchannels)
+
+            # Mix to mono
+            if nchannels > 1:
+                samples = np.mean(samples, axis=1)
+            else:
+                samples = samples[:, 0]
+
+            # Resample to target_samples using linear interpolation
+            if len(samples) != target_samples:
+                if len(samples) == 0:
+                    samples = np.zeros(target_samples, dtype=np.float32)
+                else:
+                    ratio = len(samples) / target_samples
+                    indices = np.arange(target_samples) * ratio
+                    idx_floor = np.floor(indices).astype(int)
+                    idx_ceil = np.minimum(idx_floor + 1, len(samples) - 1)
+                    frac = indices - idx_floor
+                    samples = samples[idx_floor] * (1 - frac) + samples[idx_ceil] * frac
+
+        return samples.astype(np.int16), sr
+
+    def update_frame(self, wavetable_index: int, frame_index: int, new_frame_samples: np.ndarray):
+        """
+        Update a single hardware frame (0-255) in a wavetable.
+        Does not modify WTFT metadata.
+        """
+        if wavetable_index < 0 or wavetable_index >= 64:
+            raise ValueError("Wavetable index must be 0-63")
+        if frame_index < 0 or frame_index >= 256:
+            raise ValueError("Frame index must be 0-255")
+
+        wt = self.wavetables[wavetable_index]
+        frame_len = wt.frame_len  # 2048
+
+        if len(new_frame_samples) != frame_len:
+            raise ValueError(f"Expected {frame_len} samples for frame, got {len(new_frame_samples)}")
+
+        # Calculate the offset in the file for this frame
+        start = wt.file_offset + frame_index * frame_len * 2  # *2 for bytes
+        end = start + frame_len * 2
+        self.data = self.data[:start] + new_frame_samples.astype(np.int16).tobytes() + self.data[end:]
+
 
 def main():
     import argparse
@@ -423,6 +505,8 @@ def main():
     parser.add_argument('--output', help='Output file for save')
     parser.add_argument('--sample-rate', type=int, choices=[24000, 44100, 384000],
                         help='Override sample rate for update (24000, 44100, or 384000)')
+    parser.add_argument('--update-frame', nargs=2, type=int, metavar=('WAVETABLE_IDX', 'FRAME_IDX'),
+                        help='Update a single frame (wavetable_index frame_index)')
 
     args = parser.parse_args()
 
@@ -480,6 +564,18 @@ def main():
                                     new_sample_rate=target_sample_rate)
         print(f"Updated wavetable {args.update} with sample rate: {target_sample_rate} Hz" +
               (" (from --sample-rate)" if args.sample_rate else " (from WAV file or current)"))
+        if args.output:
+            extractor.save(args.output)
+        else:
+            print("Use --output to save changes")
+
+    if args.update_frame is not None and args.wav:
+        wavetable_index, frame_index = args.update_frame
+        print(f"Loading {args.wav} for wavetable {wavetable_index}, frame {frame_index}...")
+        samples, file_sr = extractor.load_wav_to_frame(args.wav, target_samples=2048)
+        print(f"  Converted to 2048 samples (original rate: {file_sr} Hz)")
+        extractor.update_frame(wavetable_index, frame_index, samples)
+        print(f"  Updated frame {frame_index} of wavetable {wavetable_index} ({extractor.wavetables[wavetable_index].name})")
         if args.output:
             extractor.save(args.output)
         else:

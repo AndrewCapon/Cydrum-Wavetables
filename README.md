@@ -41,6 +41,13 @@ python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav -
 
 # Using advanced tool with numpy/scipy
 python3 cydrums_wavetable_tools.py SystemCore.bin --update 5 --wav my_wavetable.wav --name "MyWave" --sample-rate 44100 --output SystemCore_custom.bin
+
+# Update a single frame (2048 samples) of a wavetable from a WAV file
+# Does NOT modify WTFT metadata (sample rate, load chunks, etc.)
+python3 cydrums_simple.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_custom.bin
+
+# Using advanced tool
+python3 cydrums_wavetable_tools.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_custom.bin
 ```
 
 ## Wavetable Summary
@@ -95,6 +102,22 @@ python3 cydrums_simple.py SystemCore.bin --update-wav 10 --wav my_sound.wav --na
 
 # Override sample rate (must be 24000, 44100, or 384000)
 python3 cydrums_simple.py SystemCore.bin --update-wav 10 --wav my_sound.wav --name "CustomSine" --sample-rate 24000 --output SystemCore_new.bin
+```
+
+### Update a Single Hardware Frame
+
+Update a single 2048-sample frame within a wavetable. The WAV file is automatically:
+- Mixed to mono (if stereo)
+- Converted to 16-bit (supports 8, 16, 24, 32-bit)
+- Resampled to exactly 2048 samples (if shorter or longer)
+- **WTFT metadata is NOT modified** (sample rate, load chunks, etc. remain unchanged)
+
+```bash
+# Update frame 10 of wavetable 5 (cydrums_simple.py - no dependencies)
+python3 cydrums_simple.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_new.bin
+
+# Update frame 10 of wavetable 5 (cydrums_wavetable_tools.py - requires numpy/scipy)
+python3 cydrums_wavetable_tools.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_new.bin
 ```
 
 ### Programmatically (Python)

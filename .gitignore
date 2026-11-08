@@ -1,6 +1,7 @@
-extracted_frames
-extracted_raw
-extracted_wavs
+extracted_frames/**
+extracted_raw/**
+extracted_wavs/**
+my_frames/**
 notes.txt
 SystemCore.bin
 .DS_Store
@@ -15,3 +16,6 @@ Test2.wav
 Test3.wav
 Test4.wav
 bells.wav
+
+SingleSquare.wav
+__pycache__/cydrums_wavetable_tools.cpython-312.pyc

@@ -308,6 +308,42 @@ python3 cydrums_wavetable_tools.py SystemCore.bin \
 
 **Note:** The WAV file's audio content is NOT resampled by `cydrums_simple.py` - only the metadata is changed. The `cydrums_wavetable_tools.py` will resample if the WAV file's rate differs from the target rate (requires scipy).
 
+### Update a Single Hardware Frame
+
+Update an individual 2048-sample hardware frame within a wavetable. The WTFT metadata (sample rate, load chunks, chunk size, ram size) is **NOT modified** - only the sample data for the specified frame is replaced.
+
+```bash
+# Using cydrums_simple.py (no external dependencies)
+python3 cydrums_simple.py SystemCore.bin \
+  --update-frame 5 10 \
+  --wav my_frame.wav \
+  --output SystemCore_new.bin
+
+# Using cydrums_wavetable_tools.py (requires numpy/scipy)
+python3 cydrums_wavetable_tools.py SystemCore.bin \
+  --update-frame 5 10 \
+  --wav my_frame.wav \
+  --output SystemCore_new.bin
+```
+
+**WAV File Processing:**
+The input WAV file is automatically processed:
+- **Stereo → Mono**: Multiple channels are averaged
+- **Bit Depth Conversion**: Supports 8-bit, 16-bit, 24-bit, 32-bit → converts to 16-bit signed
+- **Resampling**: If the WAV has more or fewer than 2048 samples, it is linearly interpolated to exactly 2048 samples
+- **Original sample rate is preserved** for reference but the WTFT sample_rate field is NOT changed
+
+**Arguments:**
+- `--update-frame WAVETABLE_IDX FRAME_IDX`: Wavetable index (0-63) and frame index (0-255)
+- `--wav`: Input WAV file
+- `--output`: Output SystemCore.bin file
+
+**Use Cases:**
+- Fine-tune individual frames of a wavetable
+- Replace specific waveform cycles without affecting the entire wavetable
+- Create evolving waveforms by modifying frames progressively
+- WTFT metadata (sample rate, chunk structure) remains intact
+
 ## Creating Custom Wavetables
 
 ### Requirements
