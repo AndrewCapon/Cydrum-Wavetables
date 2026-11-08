@@ -405,6 +405,120 @@ class CyDrumsWavetableExtractor:
         """
         raise NotImplementedError("Use update_wavetable() and save() instead")
 
+    def _read_wav_raw(self, wav_path: str) -> Tuple[int, int, str, int, int, bytes]:
+        """Read WAV file manually to support formats wave module doesn't (e.g., 32-bit float)."""
+        import struct
+        with open(wav_path, 'rb') as f:
+            # RIFF header
+            riff = f.read(4)
+            if riff != b'RIFF':
+                raise ValueError("Not a RIFF file")
+            file_size = struct.unpack('<I', f.read(4))[0]
+            wave_id = f.read(4)
+            if wave_id != b'WAVE':
+                raise ValueError("Not a WAVE file")
+
+            # Parse chunks
+            nchannels = 1
+            sampwidth = 2
+            comptype = 'NONE'
+            sr = 44100
+            nframes = 0
+            data = b''
+
+            while True:
+                chunk_id = f.read(4)
+                if not chunk_id:
+                    break
+                chunk_size = struct.unpack('<I', f.read(4))[0]
+                chunk_data = f.read(chunk_size)
+                # Pad to even offset
+                if chunk_size % 2 == 1:
+                    f.read(1)
+
+                if chunk_id == b'fmt ':
+                    # fmt chunk: wFormatTag, nChannels, nSamplesPerSec, nAvgBytesPerSec, nBlockAlign, wBitsPerSample
+                    if len(chunk_data) >= 16:
+                        wFormatTag, nchannels, sr, nAvgBytesPerSec, nBlockAlign, wBitsPerSample = struct.unpack('<HHIIHH', chunk_data[:16])
+                        sampwidth = wBitsPerSample // 8
+                        # Format tag: 1=PCM, 3=IEEE float, 0xFFFE=extensible
+                        if wFormatTag == 3:
+                            comptype = 'FLOAT'
+                        elif wFormatTag == 1:
+                            comptype = 'NONE'
+                        else:
+                            comptype = f'UNKNOWN_{wFormatTag}'
+                elif chunk_id == b'data':
+                    data = chunk_data
+                    nframes = len(data) // (sampwidth * nchannels)
+                    break
+
+            if not data:
+                raise ValueError("No data chunk found")
+
+            return nchannels, sampwidth, comptype, sr, nframes, data
+
+    def load_wav(self, wav_path: str) -> Tuple[np.ndarray, int]:
+        """
+        Load full WAV file as mono int16 samples.
+        Supports 8/16/24/32-bit PCM and 32/64-bit float.
+        Returns (samples_array, sample_rate)
+        """
+        try:
+            nchannels, sampwidth, comptype, sr, nframes, frames = self._read_wav_raw(wav_path)
+        except Exception:
+            # Fallback to wave module for standard formats
+            with wave.open(wav_path, 'rb') as wf:
+                nchannels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                comptype = wf.getcomptype()
+                sr = wf.getframerate()
+                nframes = wf.getnframes()
+                frames = wf.readframes(nframes)
+
+        is_float = (comptype == 'FLOAT' or comptype == 'FL32' or comptype == 'FL64')
+
+        if sampwidth == 1:
+            samples = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+            samples = (samples - 128) * 256
+        elif sampwidth == 2:
+            samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+        elif sampwidth == 3:
+            raw = np.frombuffer(frames, dtype=np.uint8)
+            samples = []
+            for i in range(0, len(raw), 3):
+                if i + 2 < len(raw):
+                    val = raw[i] | (raw[i+1] << 8) | (raw[i+2] << 16)
+                    if val & 0x800000:
+                        val -= 0x1000000
+                    samples.append(val >> 8)
+            samples = np.array(samples, dtype=np.float32)
+        elif sampwidth == 4:
+            if is_float:
+                samples = np.frombuffer(frames, dtype=np.float32)
+            else:
+                samples = np.frombuffer(frames, dtype=np.int32).astype(np.float32)
+                samples = samples / 65536
+        elif sampwidth == 8 and is_float:
+            samples = np.frombuffer(frames, dtype=np.float64).astype(np.float32)
+        else:
+            raise ValueError(f"Unsupported sample width: {sampwidth} (comptype={comptype})")
+
+        # Convert float to int16 range
+        if is_float:
+            samples = samples * 32767
+
+        # Reshape for channels
+        samples = samples.reshape(-1, nchannels)
+
+        # Mix to mono
+        if nchannels > 1:
+            samples = np.mean(samples, axis=1)
+        else:
+            samples = samples[:, 0]
+
+        return samples.astype(np.int16), sr
+
     def load_wav_to_frame(self, wav_path: str, target_samples: int = 2048) -> Tuple[np.ndarray, int]:
         """
         Load WAV file and convert to exactly target_samples (default 2048 for one frame).
@@ -413,56 +527,72 @@ class CyDrumsWavetableExtractor:
         - Resamples to target_samples if needed
         Returns (samples_array, original_sample_rate)
         """
-        with wave.open(wav_path, 'rb') as wf:
-            nchannels = wf.getnchannels()
-            sampwidth = wf.getsampwidth()
-            sr = wf.getframerate()
-            nframes = wf.getnframes()
-            frames = wf.readframes(nframes)
+        try:
+            nchannels, sampwidth, comptype, sr, nframes, frames = self._read_wav_raw(wav_path)
+        except Exception:
+            # Fallback to wave module for standard formats
+            with wave.open(wav_path, 'rb') as wf:
+                nchannels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                comptype = wf.getcomptype()
+                sr = wf.getframerate()
+                nframes = wf.getnframes()
+                frames = wf.readframes(nframes)
 
-            if sampwidth == 1:
-                # 8-bit unsigned to 16-bit signed
-                samples = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
-                samples = (samples - 128) * 256
-            elif sampwidth == 2:
-                samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
-            elif sampwidth == 3:
-                # 24-bit - read as bytes and convert
-                raw = np.frombuffer(frames, dtype=np.uint8)
-                samples = []
-                for i in range(0, len(raw), 3):
-                    if i + 2 < len(raw):
-                        val = raw[i] | (raw[i+1] << 8) | (raw[i+2] << 16)
-                        if val & 0x800000:
-                            val -= 0x1000000
-                        samples.append(val >> 8)
-                samples = np.array(samples, dtype=np.float32)
-            elif sampwidth == 4:
+        is_float = (comptype == 'FLOAT' or comptype == 'FL32' or comptype == 'FL64')
+
+        if sampwidth == 1:
+            # 8-bit unsigned to 16-bit signed
+            samples = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+            samples = (samples - 128) * 256
+        elif sampwidth == 2:
+            samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+        elif sampwidth == 3:
+            # 24-bit - read as bytes and convert
+            raw = np.frombuffer(frames, dtype=np.uint8)
+            samples = []
+            for i in range(0, len(raw), 3):
+                if i + 2 < len(raw):
+                    val = raw[i] | (raw[i+1] << 8) | (raw[i+2] << 16)
+                    if val & 0x800000:
+                        val -= 0x1000000
+                    samples.append(val >> 8)
+            samples = np.array(samples, dtype=np.float32)
+        elif sampwidth == 4:
+            if is_float:
+                samples = np.frombuffer(frames, dtype=np.float32)
+            else:
                 samples = np.frombuffer(frames, dtype=np.int32).astype(np.float32)
                 samples = samples / 65536
+        elif sampwidth == 8 and is_float:
+            samples = np.frombuffer(frames, dtype=np.float64).astype(np.float32)
+        else:
+            raise ValueError(f"Unsupported sample width: {sampwidth} (comptype={comptype})")
+
+        # Convert float to int16 range
+        if is_float:
+            samples = samples * 32767
+
+        # Reshape for channels
+        samples = samples.reshape(-1, nchannels)
+
+        # Mix to mono
+        if nchannels > 1:
+            samples = np.mean(samples, axis=1)
+        else:
+            samples = samples[:, 0]
+
+        # Resample to target_samples using linear interpolation
+        if len(samples) != target_samples:
+            if len(samples) == 0:
+                samples = np.zeros(target_samples, dtype=np.float32)
             else:
-                raise ValueError(f"Unsupported sample width: {sampwidth}")
-
-            # Reshape for channels
-            samples = samples.reshape(-1, nchannels)
-
-            # Mix to mono
-            if nchannels > 1:
-                samples = np.mean(samples, axis=1)
-            else:
-                samples = samples[:, 0]
-
-            # Resample to target_samples using linear interpolation
-            if len(samples) != target_samples:
-                if len(samples) == 0:
-                    samples = np.zeros(target_samples, dtype=np.float32)
-                else:
-                    ratio = len(samples) / target_samples
-                    indices = np.arange(target_samples) * ratio
-                    idx_floor = np.floor(indices).astype(int)
-                    idx_ceil = np.minimum(idx_floor + 1, len(samples) - 1)
-                    frac = indices - idx_floor
-                    samples = samples[idx_floor] * (1 - frac) + samples[idx_ceil] * frac
+                ratio = len(samples) / target_samples
+                indices = np.arange(target_samples) * ratio
+                idx_floor = np.floor(indices).astype(int)
+                idx_ceil = np.minimum(idx_floor + 1, len(samples) - 1)
+                frac = indices - idx_floor
+                samples = samples[idx_floor] * (1 - frac) + samples[idx_ceil] * frac
 
         return samples.astype(np.int16), sr
 

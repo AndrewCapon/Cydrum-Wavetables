@@ -152,24 +152,139 @@ class SimpleWavetableExtractor:
             chunks.append(list(samples[start:end]))
         return chunks
 
+    def _read_wav_raw(self, wav_path):
+        """Read WAV file manually to support formats wave module doesn't (e.g., 32-bit float)."""
+        with open(wav_path, 'rb') as f:
+            # RIFF header
+            riff = f.read(4)
+            if riff != b'RIFF':
+                raise ValueError("Not a RIFF file")
+            file_size = struct.unpack('<I', f.read(4))[0]
+            wave_id = f.read(4)
+            if wave_id != b'WAVE':
+                raise ValueError("Not a WAVE file")
+
+            # Parse chunks
+            nchannels = 1
+            sampwidth = 2
+            comptype = 'NONE'
+            sr = 44100
+            nframes = 0
+            data = b''
+
+            while True:
+                chunk_id = f.read(4)
+                if not chunk_id:
+                    break
+                chunk_size = struct.unpack('<I', f.read(4))[0]
+                chunk_data = f.read(chunk_size)
+                # Pad to even offset
+                if chunk_size % 2 == 1:
+                    f.read(1)
+
+                if chunk_id == b'fmt ':
+                    # fmt chunk: wFormatTag, nChannels, nSamplesPerSec, nAvgBytesPerSec, nBlockAlign, wBitsPerSample
+                    if len(chunk_data) >= 16:
+                        wFormatTag, nchannels, sr, nAvgBytesPerSec, nBlockAlign, wBitsPerSample = struct.unpack('<HHIIHH', chunk_data[:16])
+                        sampwidth = wBitsPerSample // 8
+                        # Format tag: 1=PCM, 3=IEEE float, 0xFFFE=extensible
+                        if wFormatTag == 3:
+                            comptype = 'FLOAT'
+                        elif wFormatTag == 1:
+                            comptype = 'NONE'
+                        else:
+                            comptype = f'UNKNOWN_{wFormatTag}'
+                elif chunk_id == b'data':
+                    data = chunk_data
+                    nframes = len(data) // (sampwidth * nchannels)
+                    break
+
+            if not data:
+                raise ValueError("No data chunk found")
+
+            return nchannels, sampwidth, comptype, sr, nframes, data
+
     def load_wav(self, wav_path):
-        with wave.open(wav_path, 'rb') as wf:
-            if wf.getnchannels() != 1:
-                raise ValueError("Only mono supported")
-            if wf.getsampwidth() != 2:
-                raise ValueError("Only 16-bit supported")
-            sr = wf.getframerate()
-            frames = wf.readframes(wf.getnframes())
-            samples = struct.unpack('<' + 'h' * wf.getnframes(), frames)
+        try:
+            nchannels, sampwidth, comptype, sr, nframes, frames = self._read_wav_raw(wav_path)
+        except Exception:
+            # Fallback to wave module for standard formats
+            with wave.open(wav_path, 'rb') as wf:
+                nchannels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                comptype = wf.getcomptype()
+                sr = wf.getframerate()
+                nframes = wf.getnframes()
+                frames = wf.readframes(nframes)
+
+        # Support multiple bit depths and formats (runs for BOTH paths)
+        is_float = (comptype == 'FLOAT' or comptype == 'FL32' or comptype == 'FL64')
+
+        if sampwidth == 1:
+            # 8-bit unsigned
+            samples = struct.unpack('<' + 'B' * nframes * nchannels, frames)
+            samples = [(s - 128) * 256 for s in samples]
+        elif sampwidth == 2:
+            # 16-bit signed
+            samples = struct.unpack('<' + 'h' * nframes * nchannels, frames)
+        elif sampwidth == 3:
+            # 24-bit signed (packed in 3 bytes)
+            raw = list(frames)
+            samples = []
+            for i in range(0, len(raw), 3):
+                if i + 2 < len(raw):
+                    val = raw[i] | (raw[i+1] << 8) | (raw[i+2] << 16)
+                    if val & 0x800000:
+                        val -= 0x1000000
+                    samples.append(val >> 8)  # Convert to 16-bit
+        elif sampwidth == 4:
+            if is_float:
+                # 32-bit float (-1.0 to 1.0)
+                samples = struct.unpack('<' + 'f' * nframes * nchannels, frames)
+                samples = [int(s * 32767) for s in samples]
+            else:
+                # 32-bit signed int
+                samples = struct.unpack('<' + 'i' * nframes * nchannels, frames)
+                samples = [int(s / 65536) for s in samples]  # Convert to 16-bit
+        elif sampwidth == 8 and is_float:
+            # 64-bit float (rare)
+            samples = struct.unpack('<' + 'd' * nframes * nchannels, frames)
+            samples = [int(s * 32767) for s in samples]
+        else:
+            raise ValueError(f"Unsupported sample width: {sampwidth} (comptype={comptype})")
+
+        # Convert to mono if stereo
+        if nchannels == 2:
+            mono_samples = []
+            for i in range(0, len(samples), 2):
+                if i + 1 < len(samples):
+                    mono_samples.append((samples[i] + samples[i+1]) // 2)
+                else:
+                    mono_samples.append(samples[i])
+            samples = mono_samples
+        elif nchannels > 2:
+            mono_samples = []
+            for i in range(0, len(samples), nchannels):
+                chunk = samples[i:i+nchannels]
+                mono_samples.append(sum(chunk) // len(chunk))
+            samples = mono_samples
+
         return list(samples), sr
 
     def load_wav_to_frame(self, wav_path, target_samples=2048):
-        with wave.open(wav_path, 'rb') as wf:
-            nchannels = wf.getnchannels()
-            sampwidth = wf.getsampwidth()
-            sr = wf.getframerate()
-            nframes = wf.getnframes()
-            frames = wf.readframes(nframes)
+        try:
+            nchannels, sampwidth, comptype, sr, nframes, frames = self._read_wav_raw(wav_path)
+        except Exception:
+            # Fallback to wave module for standard formats
+            with wave.open(wav_path, 'rb') as wf:
+                nchannels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                comptype = wf.getcomptype()
+                sr = wf.getframerate()
+                nframes = wf.getnframes()
+                frames = wf.readframes(nframes)
+
+            is_float = (comptype == 'FLOAT' or comptype == 'FL32' or comptype == 'FL64')
 
             if sampwidth == 1:
                 samples = struct.unpack('<' + 'B' * nframes * nchannels, frames)
@@ -186,10 +301,17 @@ class SimpleWavetableExtractor:
                             val -= 0x1000000
                         samples.append(val >> 8)
             elif sampwidth == 4:
-                samples = struct.unpack('<' + 'i' * nframes * nchannels, frames)
-                samples = [int(s / 65536) for s in samples]
+                if is_float:
+                    samples = struct.unpack('<' + 'f' * nframes * nchannels, frames)
+                    samples = [int(s * 32767) for s in samples]
+                else:
+                    samples = struct.unpack('<' + 'i' * nframes * nchannels, frames)
+                    samples = [int(s / 65536) for s in samples]
+            elif sampwidth == 8 and is_float:
+                samples = struct.unpack('<' + 'd' * nframes * nchannels, frames)
+                samples = [int(s * 32767) for s in samples]
             else:
-                raise ValueError(f"Unsupported sample width: {sampwidth}")
+                raise ValueError(f"Unsupported sample width: {sampwidth} (comptype={comptype})")
 
             if nchannels == 2:
                 mono_samples = []
@@ -1147,18 +1269,46 @@ async function updateFullWavetable(wtIndex, wavFile, newName) {
 
     // Process in Python - use global extractor
     const sampleRate = parseInt(sampleRateSelect.value);
-    const result = pyodide.runPython(`
+    const pyResult = pyodide.runPython(`
 samples, sr = extractor.load_wav('/temp.wav')
 d = extractor.load_descriptors[${wtIndex}]
-expected = d['ram_size'] // 2
-if len(samples) < expected:
+expected = d['ram_size'] // 2  # 524288 samples (256 frames × 2048)
+frame_len = d['frame_len']     # 2048 samples per frame
+
+# Detect how many frames in the imported WAV
+imported_frames = len(samples) // frame_len
+original_frames = imported_frames
+
+if imported_frames < 256 and imported_frames > 0:
+    # Duplicate frames to fill 256 frames
+    frame_data = samples[:imported_frames * frame_len]
+    repeats = 256 // imported_frames
+    remainder = 256 % imported_frames
+
+    # Build full 256 frames by repeating
+    full_samples = []
+    for _ in range(repeats):
+        full_samples.extend(frame_data)
+    # Add remainder frames
+    if remainder > 0:
+        full_samples.extend(frame_data[:remainder * frame_len])
+    samples = full_samples
+elif len(samples) < expected:
+    # Pad with zeros if somehow still short
     samples = samples + [0] * (expected - len(samples))
 elif len(samples) > expected:
     samples = samples[:expected]
+
 extractor.update_wavetable(${wtIndex}, samples, new_name="${newName}", new_sr=${sampleRate})
 extractor.save('/SystemCore_modified.bin')
-"Updated wavetable ${wtIndex} (${newName}) with sample rate ${sampleRate} Hz"
+
+# Return original frame count for status message
+original_frames
     `);
+
+    const importedFrames = pyResult;  // Already a JS number, not a proxy
+    const framesInfo = importedFrames > 0 && importedFrames < 256 ? ` (${importedFrames} frames → 256 frames)` : '';
+    updateStatus(`Updated wavetable ${wtIndex} (${newName}) with sample rate ${sampleRate} Hz${framesInfo}`);
 
     // Refresh wavetable list to show new name
     renderWavetableList();
