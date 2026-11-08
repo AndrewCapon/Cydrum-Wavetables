@@ -6,51 +6,6 @@ Before using any of this take a full backup of your sdcard, definately make sure
 
 I take absolutely no responsibility for any damage caused by using these tools.
 
-## Files
-
-| File | Description |
-|------|-------------|
-| `cydrums_simple.py` | **Main tool** - No external dependencies (stdlib only) |
-| `cydrums_wavetable_tools.py` | Advanced tool with numpy/scipy support |
-| `index.html` / `style.css` / `app.js` | **Web app** - Browser-based editor (Pyodide/WebAssembly) |
-| `WAVETABLE_FORMAT.md` | Complete file format documentation |
-| `README.md` | This file |
-
-## Quick Start
-
-```bash
-# List all 64 wavetables
-python3 cydrums_simple.py SystemCore.bin --list
-
-# Extract all as WAV files (full wavetables)
-python3 cydrums_simple.py SystemCore.bin --extract-wav my_wavetables/
-
-# Extract all 256 hardware frames per wavetable as separate WAVs
-python3 cydrums_simple.py SystemCore.bin --extract-frames my_frames/
-
-# Extract all 16 SD load chunks per wavetable as separate WAVs
-python3 cydrums_simple.py SystemCore.bin --extract-chunks my_chunks/
-
-# Generate a sine wavetable and replace index 0
-python3 cydrums_simple.py SystemCore.bin --generate-sine --index 0 --output SystemCore_custom.bin
-
-# Replace wavetable 5 with a WAV file (uses WAV file's sample rate)
-python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav --name "MyWave" --output SystemCore_custom.bin
-
-# Replace wavetable 5 with a WAV file and override sample rate
-python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav --name "MyWave" --sample-rate 24000 --output SystemCore_custom.bin
-
-# Using advanced tool with numpy/scipy
-python3 cydrums_wavetable_tools.py SystemCore.bin --update 5 --wav my_wavetable.wav --name "MyWave" --sample-rate 44100 --output SystemCore_custom.bin
-
-# Update a single frame (2048 samples) of a wavetable from a WAV file
-# Does NOT modify WTFT metadata (sample rate, load chunks, etc.)
-python3 cydrums_simple.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_custom.bin
-
-# Using advanced tool
-python3 cydrums_wavetable_tools.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_custom.bin
-```
-
 ## Web App (Browser-Based Editor)
 
 The web app provides a visual, drag-and-drop interface for editing SystemCore.bin wavetables. It runs entirely in the browser using Pyodide (Python WebAssembly) — no Python installation required.
@@ -120,6 +75,52 @@ Then open `http://localhost:8000` in your browser.
 | Safari 14+ | ✅ Full support |
 
 **Note**: Requires WebAssembly and SharedArrayBuffer support. Some browsers require a secure context (HTTPS or localhost) — local `file://` URLs may not work.
+
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `cydrums_simple.py` | **Main tool** - No external dependencies (stdlib only) |
+| `cydrums_wavetable_tools.py` | Advanced tool with numpy/scipy support |
+| `index.html` / `style.css` / `app.js` | **Web app** - Browser-based editor (Pyodide/WebAssembly) |
+| `WAVETABLE_FORMAT.md` | Complete file format documentation |
+| `README.md` | This file |
+
+## Quick Start
+
+```bash
+# List all 64 wavetables
+python3 cydrums_simple.py SystemCore.bin --list
+
+# Extract all as WAV files (full wavetables)
+python3 cydrums_simple.py SystemCore.bin --extract-wav my_wavetables/
+
+# Extract all 256 hardware frames per wavetable as separate WAVs
+python3 cydrums_simple.py SystemCore.bin --extract-frames my_frames/
+
+# Extract all 16 SD load chunks per wavetable as separate WAVs
+python3 cydrums_simple.py SystemCore.bin --extract-chunks my_chunks/
+
+# Generate a sine wavetable and replace index 0
+python3 cydrums_simple.py SystemCore.bin --generate-sine --index 0 --output SystemCore_custom.bin
+
+# Replace wavetable 5 with a WAV file (uses WAV file's sample rate)
+python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav --name "MyWave" --output SystemCore_custom.bin
+
+# Replace wavetable 5 with a WAV file and override sample rate
+python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav --name "MyWave" --sample-rate 24000 --output SystemCore_custom.bin
+
+# Using advanced tool with numpy/scipy
+python3 cydrums_wavetable_tools.py SystemCore.bin --update 5 --wav my_wavetable.wav --name "MyWave" --sample-rate 44100 --output SystemCore_custom.bin
+
+# Update a single frame (2048 samples) of a wavetable from a WAV file
+# Does NOT modify WTFT metadata (sample rate, load chunks, etc.)
+python3 cydrums_simple.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_custom.bin
+
+# Using advanced tool
+python3 cydrums_wavetable_tools.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_custom.bin
+```
 
 ## Wavetable Summary
 
