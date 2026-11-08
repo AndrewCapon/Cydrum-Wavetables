@@ -31,8 +31,14 @@ python3 cydrums_simple.py SystemCore.bin --extract-chunks my_chunks/
 # Generate a sine wavetable and replace index 0
 python3 cydrums_simple.py SystemCore.bin --generate-sine --index 0 --output SystemCore_custom.bin
 
-# Replace wavetable 5 with a WAV file
+# Replace wavetable 5 with a WAV file (uses WAV file's sample rate)
 python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav --name "MyWave" --output SystemCore_custom.bin
+
+# Replace wavetable 5 with a WAV file and override sample rate
+python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav --name "MyWave" --sample-rate 24000 --output SystemCore_custom.bin
+
+# Using advanced tool with numpy/scipy
+python3 cydrums_wavetable_tools.py SystemCore.bin --update 5 --wav my_wavetable.wav --name "MyWave" --sample-rate 44100 --output SystemCore_custom.bin
 ```
 
 ## Wavetable Summary
@@ -82,7 +88,11 @@ python3 cydrums_simple.py SystemCore.bin --update-wav 5 --wav my_wavetable.wav -
 ```bash
 # WAV must be: Mono, 16-bit
 # Will be resized to 524,288 samples (16 load chunks × 32,768 = 256 hardware frames × 2,048)
+# Uses WAV file's sample rate by default
 python3 cydrums_simple.py SystemCore.bin --update-wav 10 --wav my_sound.wav --name "CustomSine" --output SystemCore_new.bin
+
+# Override sample rate (must be 24000, 44100, or 384000)
+python3 cydrums_simple.py SystemCore.bin --update-wav 10 --wav my_sound.wav --name "CustomSine" --sample-rate 24000 --output SystemCore_new.bin
 ```
 
 ### Programmatically (Python)

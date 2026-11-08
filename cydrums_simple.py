@@ -395,7 +395,7 @@ def main():
         print("  python3 cydrums_simple.py SystemCore.bin --extract-chunks out_dir")
         print("  python3 cydrums_simple.py SystemCore.bin --extract-raw out_dir")
         print("  python3 cydrums_simple.py SystemCore.bin --generate-sine --index 0 --output SystemCore_new.bin")
-        print("  python3 cydrums_simple.py SystemCore.bin --update-wav 0 input.wav --name NewName --output SystemCore_new.bin")
+        print("  python3 cydrums_simple.py SystemCore.bin --update-wav 0 input.wav --name NewName --output SystemCore_new.bin [--sample-rate 24000|44100|384000]")
         return
 
     bin_file = sys.argv[1]
@@ -478,9 +478,23 @@ def main():
                 o_idx = sys.argv.index('--output')
                 output_file = sys.argv[o_idx + 1]
 
+            # Parse optional --sample-rate argument
+            new_sr = None
+            if '--sample-rate' in sys.argv:
+                sr_idx = sys.argv.index('--sample-rate')
+                if sr_idx + 1 < len(sys.argv):
+                    try:
+                        new_sr = int(sys.argv[sr_idx + 1])
+                        if new_sr not in (24000, 44100, 384000):
+                            print(f"Error: --sample-rate must be one of: 24000, 44100, 384000 (got {new_sr})")
+                            return
+                    except ValueError:
+                        print(f"Error: --sample-rate must be an integer")
+                        return
+
             if wav_file:
                 print(f"Loading {wav_file}...")
-                samples, sr = extractor.load_wav(wav_file)
+                samples, file_sr = extractor.load_wav(wav_file)
                 d = extractor.load_descriptors[target_index]
 
                 # Resize to match expected length (524288 samples)
@@ -490,8 +504,11 @@ def main():
                 elif len(samples) > expected:
                     samples = samples[:expected]
 
+                # Use provided sample rate or fall back to WAV file's sample rate
+                sr_to_use = new_sr if new_sr else file_sr
                 print(f"Updating wavetable {target_index} ({extractor.names[target_index]})")
-                extractor.update_wavetable(target_index, samples, new_name=new_name, new_sr=sr)
+                print(f"  Sample rate: {sr_to_use} Hz" + (" (from --sample-rate)" if new_sr else f" (from WAV file)"))
+                extractor.update_wavetable(target_index, samples, new_name=new_name, new_sr=sr_to_use)
                 extractor.save(output_file)
             else:
                 print("Error: --wav required for --update-wav")

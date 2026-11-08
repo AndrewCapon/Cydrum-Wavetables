@@ -276,6 +276,36 @@ python3 cydrums_wavetable_tools.py SystemCore.bin \
   --output SystemCore_modified.bin
 ```
 
+### Update a Wavetable with Sample Rate Override
+
+Both `cydrums_simple.py` and `cydrums_wavetable_tools.py` support an optional `--sample-rate` argument to override the sample rate stored in the WTFT metadata. This must be one of the three valid sample rates used by the hardware:
+
+```bash
+# Using cydrums_simple.py (no external dependencies)
+python3 cydrums_simple.py SystemCore.bin \
+  --update-wav 5 \
+  --wav my_wavetable.wav \
+  --name "MyWave" \
+  --sample-rate 24000 \
+  --output SystemCore_new.bin
+
+# Using cydrums_wavetable_tools.py (requires numpy/scipy)
+python3 cydrums_wavetable_tools.py SystemCore.bin \
+  --update 5 \
+  --wav my_wavetable.wav \
+  --name "MyWave" \
+  --sample-rate 44100 \
+  --output SystemCore_new.bin
+
+# Valid sample rates: 24000, 44100, 384000
+```
+
+**Behavior:**
+- If `--sample-rate` is provided: Uses the specified rate (24000, 44100, or 384000) and writes it to the WTFT `sample_rate` field
+- If `--sample-rate` is NOT provided: Uses the WAV file's native sample rate (for `cydrums_simple.py`) or the wavetable's current sample rate (for `cydrums_wavetable_tools.py`)
+
+**Note:** The WAV file's audio content is NOT resampled by `cydrums_simple.py` - only the metadata is changed. The `cydrums_wavetable_tools.py` will resample if the WAV file's rate differs from the target rate (requires scipy).
+
 ## Creating Custom Wavetables
 
 ### Requirements

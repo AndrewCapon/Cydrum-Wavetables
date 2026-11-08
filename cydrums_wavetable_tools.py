@@ -421,6 +421,8 @@ def main():
     parser.add_argument('--wav', help='WAV file for update')
     parser.add_argument('--name', help='New name for update')
     parser.add_argument('--output', help='Output file for save')
+    parser.add_argument('--sample-rate', type=int, choices=[24000, 44100, 384000],
+                        help='Override sample rate for update (24000, 44100, or 384000)')
 
     args = parser.parse_args()
 
@@ -465,14 +467,19 @@ def main():
             print(f"  Frame {f:3d}: min={frame.min():6d}, max={frame.max():6d}, mean={frame.mean():7.1f}, zc={zc}")
 
     if args.update is not None and args.wav:
+        # Use --sample-rate if provided, otherwise use the wavetable's current sample rate
+        target_sample_rate = args.sample_rate if args.sample_rate else extractor.wavetables[args.update].sample_rate
+
         samples, metadata = extractor.create_wavetable_from_wav(
             args.wav,
             args.name or extractor.wavetables[args.update].name,
-            sample_rate=extractor.wavetables[args.update].sample_rate
+            sample_rate=target_sample_rate
         )
         extractor.update_wavetable(args.update, samples,
                                     new_name=args.name,
-                                    new_sample_rate=metadata['sample_rate'])
+                                    new_sample_rate=target_sample_rate)
+        print(f"Updated wavetable {args.update} with sample rate: {target_sample_rate} Hz" +
+              (" (from --sample-rate)" if args.sample_rate else " (from WAV file or current)"))
         if args.output:
             extractor.save(args.output)
         else:
