@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CyDrums SystemCore.bin Editor</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>CyDrums SystemCore.bin Editor</h1>
+      <div class="header-controls">
+        <label for="file-input" class="btn-file" title="Load SystemCore.bin">
+          Choose File
+          <input type="file" id="file-input" accept=".bin" hidden>
+        </label>
+        <select id="sample-rate-select" title="Sample rate for full wavetable updates">
+          <option value="24000">24000 Hz</option>
+          <option value="44100" selected>44100 Hz</option>
+          <option value="384000">384000 Hz</option>
+        </select>
+        <button id="download-btn" disabled title="Download modified SystemCore.bin">Download</button>
+        <select id="theme-select" class="theme-select" title="Choose theme" aria-label="Theme">
+          <option value="light">☀️ Light</option>
+          <option value="dark">🌙 Dark</option>
+        </select>
+      </div>
+    </header>
+    <main>
+      <aside id="wavetable-list" class="panel">
+        <div class="panel-header">Wavetables (64)</div>
+        <div id="wavetable-items" class="wavetable-items"></div>
+      </aside>
+      <section id="frame-view" class="panel">
+        <div class="panel-header">
+          <span id="selected-wt-name">Select a wavetable</span>
+          <span id="selected-wt-info" class="wt-info"></span>
+        </div>
+        <div id="frame-grid" class="frame-grid"></div>
+        <div id="no-selection" class="no-selection">Click a wavetable on the left to view its 256 frames</div>
+      </section>
+    </main>
+    <div id="status-bar" class="status-bar">Ready. Load a SystemCore.bin file to begin.</div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

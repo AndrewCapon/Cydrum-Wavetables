@@ -12,6 +12,7 @@ I take absolutely no responsibility for any damage caused by using these tools.
 |------|-------------|
 | `cydrums_simple.py` | **Main tool** - No external dependencies (stdlib only) |
 | `cydrums_wavetable_tools.py` | Advanced tool with numpy/scipy support |
+| `index.html` / `style.css` / `app.js` | **Web app** - Browser-based editor (Pyodide/WebAssembly) |
 | `WAVETABLE_FORMAT.md` | Complete file format documentation |
 | `README.md` | This file |
 
@@ -49,6 +50,76 @@ python3 cydrums_simple.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav 
 # Using advanced tool
 python3 cydrums_wavetable_tools.py SystemCore.bin --update-frame 5 10 --wav my_frame.wav --output SystemCore_custom.bin
 ```
+
+## Web App (Browser-Based Editor)
+
+The web app provides a visual, drag-and-drop interface for editing SystemCore.bin wavetables. It runs entirely in the browser using Pyodide (Python WebAssembly) — no Python installation required.
+
+### Running the Web App
+
+**Option 1: Open directly in browser**
+```bash
+# Just open index.html in your browser (Chrome/Edge/Firefox/Safari)
+# Note: Some browsers block local file access for WebAssembly
+# If it doesn't work, use Option 2
+```
+
+**Option 2: Serve with a local HTTP server (recommended)**
+```bash
+# Python 3
+python3 -m http.server 8000
+
+# Node.js
+npx serve
+
+# PHP
+php -S localhost:8000
+```
+Then open `http://localhost:8000` in your browser.
+
+### Web App Features
+
+| Feature | Description |
+|---------|-------------|
+| **Load SystemCore.bin** | Drag-and-drop or click "Choose File" to load your file |
+| **Browse 64 Wavetables** | Left panel shows all wavetables with names and sample rates |
+| **View 256 Frames** | Click a wavetable to see all 256 hardware frames as waveforms |
+| **Drag to Reorder** | Drag wavetables in the list or frames in the grid to swap positions |
+| **Drop WAV Files** | Drop a `.wav` file onto a wavetable to replace the entire wavetable, or onto a single frame to replace just that frame |
+| **Export** | Right-click any wavetable or frame → "Export as WAV" (also works via drag-out to desktop) |
+| **Download Modified** | Click "Download" to save your modified `SystemCore_modified.bin` |
+| **Theme Switcher** | ☀️ Light / 🌙 Dark mode (persists in localStorage) |
+| **Sample Rate Selector** | Choose 24kHz, 44.1kHz, or 384kHz for full wavetable updates |
+
+### Workflow Example
+
+1. **Load** your `SystemCore.bin` file
+2. **Select** a wavetable from the left panel
+3. **Inspect** the 256 frames in the grid — each shows a miniature waveform
+4. **Modify** by:
+   - Dragging a `.wav` file onto a frame to replace that single frame
+   - Dragging a `.wav` file onto a wavetable name to replace the entire wavetable
+   - Dragging frames/wavetables to reorder them
+5. **Export** individual frames or wavetables via right-click menu
+6. **Download** the modified `SystemCore_modified.bin` when done
+
+### Supported WAV Formats
+
+- **Channels**: Mono or stereo (auto-mixed to mono)
+- **Bit depth**: 8-bit, 16-bit, 24-bit, 32-bit float
+- **Sample rate**: Any (resampled to match wavetable's sample rate)
+- **Duration**: Auto-resampled to 2048 samples (frame) or 524,288 samples (full wavetable)
+
+### Browser Compatibility
+
+| Browser | Status |
+|---------|--------|
+| Chrome 88+ | ✅ Full support |
+| Edge 88+ | ✅ Full support |
+| Firefox 78+ | ✅ Full support |
+| Safari 14+ | ✅ Full support |
+
+**Note**: Requires WebAssembly and SharedArrayBuffer support. Some browsers require a secure context (HTTPS or localhost) — local `file://` URLs may not work.
 
 ## Wavetable Summary
 
