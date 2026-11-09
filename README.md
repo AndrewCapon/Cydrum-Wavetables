@@ -2,7 +2,9 @@
 
 This repository contains tools for analyzing, extracting, and modifying wavetables in the CyDrums Drum Synth's `SystemCore.bin` file.
 
-Before using any of this take a full backup of your sdcard, definately make sure you have a backup or two of SystemCore.bin somewhere as I have no idea of how you would get the original back.
+Before using any of this take a full backup of your sdcard, definately make sure you have a backup or two of SystemCore.bin somewhere.
+
+The original SystemCore.bin can be downloaded from : https://www.sonicware.co.jp/DL/CyDrums/CyDrums_folder.zip
 
 I take absolutely no responsibility for any damage caused by using these tools.
 
