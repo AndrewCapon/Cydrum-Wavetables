@@ -629,7 +629,8 @@ function renderWavetableList() {
       <span class="wt-rate">${wt.sample_rate.toLocaleString()} Hz</span>
     `;
 
-    div.addEventListener('click', () => selectWavetable(wt.index));
+    div.addEventListener('mousedown', () => selectWavetable(wt.index));
+    div.addEventListener('click', (e) => e.preventDefault()); // Prevent default click behavior
 
     // Swap handlers (MUST be first so dragstart runs before export handler)
     div.addEventListener('dragstart', (e) => handleDragStartWavetableSwap(e, wt.index));
@@ -651,23 +652,38 @@ function renderWavetableList() {
 }
 
 function selectWavetable(index) {
-  // Update selection UI
-  document.querySelectorAll('.wt-item').forEach(el => {
-    el.classList.toggle('selected', parseInt(el.dataset.index) === index);
-  });
+  // Immediately update selection UI - remove old selection first for instant visual feedback
+  const previousSelected = document.querySelector('.wt-item.selected');
+  if (previousSelected) {
+    previousSelected.classList.remove('selected');
+  }
+  const newSelected = document.querySelector(`.wt-item[data-index="${index}"]`);
+  if (newSelected) {
+    newSelected.classList.add('selected');
+  }
 
   selectedWtIndex = index;
-  const wt = extractor.list_wavetables().toJs()[index];
-  selectedWtName.textContent = wt.name;
-  selectedWtInfo.textContent = `Index ${index} • ${wt.sample_rate.toLocaleString()} Hz • 256 frames`;
 
-  noSelection.style.display = 'none';
-  frameGrid.style.display = 'grid';
+  // Use requestAnimationFrame + setTimeout to ensure browser paints selection change before heavy work
+  requestAnimationFrame(() => {
+    // Defer Python calls to next task so browser can paint first
+    setTimeout(() => {
+      const wt = extractor.list_wavetables().toJs()[index];
+      selectedWtName.textContent = wt.name;
+      selectedWtInfo.textContent = `Index ${index} • ${wt.sample_rate.toLocaleString()} Hz • 256 frames`;
 
-  renderFrames(index);
+      noSelection.style.display = 'none';
+      frameGrid.style.display = 'grid';
+
+      renderFrames(index);
+    }, 0);
+  });
 }
 
 async function renderFrames(wtIndex) {
+  // Yield to event loop first to let selection UI paint
+  await new Promise(r => setTimeout(r, 0));
+
   updateStatus('Rendering frames...');
 
   // Get frames from Python (returns list of lists)
