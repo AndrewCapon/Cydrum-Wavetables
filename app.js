@@ -25,6 +25,12 @@ async function initPyodide() {
 
   updateStatus('Ready. Load a SystemCore.bin file to begin.');
   document.getElementById('file-input').disabled = false;
+
+  // Hide loading overlay
+  const overlay = document.getElementById('loading-overlay');
+  if (overlay) {
+    overlay.classList.add('hidden');
+  }
 }
 
 // Python module embedded as template literal
