@@ -394,7 +394,11 @@ class SimpleWavetableExtractor:
                     wtnm_start = pos + 8
                     name_bytes = new_name.encode('ascii') + b'\\x00'
                     name_len = min(len(name_bytes), 12)
-                    new_wtnm = struct.pack('<III', 0, 1, name_len) + name_bytes.ljust(12, b'\\x00')[:12] + b'WTFT$\\x00\\x00\\x00'
+                    # Keep original structure: 3 uint32s + padded name (no hardcoded WTFT tag!)
+                    new_wtnm = struct.pack('<III', 0, 1, name_len) + name_bytes.ljust(12, b'\\x00')[:12]
+                    # Pad to original size if needed
+                    if len(new_wtnm) < size:
+                        new_wtnm = new_wtnm.ljust(size, b'\\x00')
                     self.wtls_data = self.wtls_data[:wtnm_start] + new_wtnm + self.wtls_data[wtnm_start+size:]
                     self.data[8:8+len(self.wtls_data)] = self.wtls_data
                     return
