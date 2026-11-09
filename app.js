@@ -699,20 +699,11 @@ async function renderFrames(wtIndex) {
   frameGrid.innerHTML = '';
   frameCanvases = [];
 
-  // Process in chunks to avoid blocking UI
-  const batchSize = 32;
-  for (let i = 0; i < frames.length; i += batchSize) {
-    const batch = frames.slice(i, i + batchSize);
-
-    for (let j = 0; j < batch.length; j++) {
-      const frameIdx = i + j;
-      const frameData = batch[j];
-      const cell = createFrameCell(frameIdx, frameData, sampleRate);
-      frameGrid.appendChild(cell);
-    }
-
-    // Yield to event loop
-    await new Promise(r => setTimeout(r, 0));
+  // Create all frame cells at once
+  for (let frameIdx = 0; frameIdx < frames.length; frameIdx++) {
+    const frameData = frames[frameIdx];
+    const cell = createFrameCell(frameIdx, frameData, sampleRate);
+    frameGrid.appendChild(cell);
   }
 
   updateStatus(`Showing 256 frames for wavetable ${wtIndex}`);
