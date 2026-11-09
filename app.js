@@ -1167,6 +1167,9 @@ function addContextMenuExport() {
         <button data-action="export-wavetable" data-index="${wtIndex}">
           📤 Export Wavetable as WAV
         </button>
+        <button data-action="export-wavetable-frames" data-index="${wtIndex}">
+          📤 Export All Frames as ZIP (256 frames)
+        </button>
       `;
     } else if (frameCell && selectedWtIndex !== null) {
       const frameIdx = parseInt(frameCell.dataset.frameIndex);
@@ -1197,6 +1200,8 @@ function addContextMenuExport() {
 
       if (action === 'export-wavetable') {
         await exportWavetableAsWav(index);
+      } else if (action === 'export-wavetable-frames') {
+        await exportWavetableFramesAsWavs(index);
       } else if (action === 'export-frame') {
         await exportFrameAsWav(index);
       }
@@ -1245,6 +1250,49 @@ async function exportFrameAsWav(frameIdx) {
 
     downloadBlob(wavBlob, filename);
     updateStatus(`Exported frame ${frameIdx} as ${filename}`);
+  } catch (err) {
+    updateStatus(`Export error: ${err.message}`);
+    console.error(err);
+  }
+}
+
+async function exportWavetableFramesAsWavs(wtIndex) {
+  try {
+    const wtInfo = extractor.list_wavetables().toJs()[wtIndex];
+    const sampleRate = wtInfo.sample_rate;
+    const wtName = wtInfo.name || `WT${wtIndex}`;
+
+    updateStatus(`Exporting all 256 frames of "${wtName}"...`);
+
+    // Get all frames at once (more efficient)
+    const frames = extractor.get_frames(wtIndex).toJs();
+
+    // Create zip file
+    const zip = new JSZip();
+
+    // Add each frame as a WAV file to the zip
+    for (let frameIdx = 0; frameIdx < frames.length; frameIdx++) {
+      const samples = frames[frameIdx];
+      const wavBlob = createWavBlob(samples, sampleRate);
+      const filename = `${wtName}_Frame${frameIdx.toString().padStart(3, '0')}.wav`;
+
+      // Convert blob to array buffer for JSZip
+      const arrayBuffer = await wavBlob.arrayBuffer();
+      zip.file(filename, arrayBuffer);
+
+      // Small yield to keep UI responsive
+      if (frameIdx % 32 === 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    // Generate zip and download
+    updateStatus(`Creating ZIP archive...`);
+    const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    const zipFilename = `${wtName}_frames.zip`;
+
+    downloadBlob(zipBlob, zipFilename);
+    updateStatus(`Exported all 256 frames of "${wtName}" as ${zipFilename}`);
   } catch (err) {
     updateStatus(`Export error: ${err.message}`);
     console.error(err);
