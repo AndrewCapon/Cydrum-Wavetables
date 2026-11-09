@@ -42,8 +42,8 @@ Then open `http://localhost:8000` in your browser.
 | **Browse 64 Wavetables** | Left panel shows all wavetables with names and sample rates |
 | **View 256 Frames** | Click a wavetable to see all 256 hardware frames as waveforms |
 | **Drag to Reorder** | Drag wavetables in the list or frames in the grid to swap positions |
-| **Drop WAV Files** | Drop a `.wav` file onto a wavetable to replace the entire wavetable, or onto a single frame to replace just that frame |
-| **Export** | Right-click any wavetable or frame → "Export as WAV" (also works via drag-out to desktop) |
+| **Drop WAV Files** | Drop a `.wav` file onto a wavetable to replace the entire wavetable, or onto a single frame to replace just that frame. Multiple files can be dropped at the same time. |
+| **Export** | Right-click any wavetable or frame → "Export as WAV" (also works via drag-out to desktop), "Export All Frames as ZIP (256 frames)" will export all the frames of the wavetable as a ZIP file  |
 | **Download Modified** | Click "Download" to save your modified `SystemCore_modified.bin` |
 | **Theme Switcher** | ☀️ Light / 🌙 Dark mode (persists in localStorage) |
 | **Sample Rate Selector** | Choose 24kHz, 44.1kHz, or 384kHz for full wavetable updates |
