@@ -610,6 +610,7 @@ function handleFileLoad(e) {
       // Store extractor in Python global scope for later access
       pyodide.globals.set('extractor', extractor);
       renderWavetableList();
+      selectWavetable(0);  // Auto-select first wavetable
       downloadBtn.disabled = false;
       updateStatus(`Loaded ${file.name} - 64 wavetables ready`);
     } catch (err) {
