@@ -272,6 +272,7 @@ class SimpleWavetableExtractor:
         return list(samples), sr
 
     def load_wav_to_frame(self, wav_path, target_samples=2048):
+        # Read WAV file - try custom parser first, fallback to wave module
         try:
             nchannels, sampwidth, comptype, sr, nframes, frames = self._read_wav_raw(wav_path)
         except Exception:
@@ -284,64 +285,73 @@ class SimpleWavetableExtractor:
                 nframes = wf.getnframes()
                 frames = wf.readframes(nframes)
 
-            is_float = (comptype == 'FLOAT' or comptype == 'FL32' or comptype == 'FL64')
+        is_float = (comptype == 'FLOAT' or comptype == 'FL32' or comptype == 'FL64')
 
-            if sampwidth == 1:
-                samples = struct.unpack('<' + 'B' * nframes * nchannels, frames)
-                samples = [(s - 128) * 256 for s in samples]
-            elif sampwidth == 2:
-                samples = struct.unpack('<' + 'h' * nframes * nchannels, frames)
-            elif sampwidth == 3:
-                raw = list(frames)
-                samples = []
-                for i in range(0, len(raw), 3):
-                    if i + 2 < len(raw):
-                        val = raw[i] | (raw[i+1] << 8) | (raw[i+2] << 16)
-                        if val & 0x800000:
-                            val -= 0x1000000
-                        samples.append(val >> 8)
-            elif sampwidth == 4:
-                if is_float:
-                    samples = struct.unpack('<' + 'f' * nframes * nchannels, frames)
-                    samples = [int(s * 32767) for s in samples]
-                else:
-                    samples = struct.unpack('<' + 'i' * nframes * nchannels, frames)
-                    samples = [int(s / 65536) for s in samples]
-            elif sampwidth == 8 and is_float:
-                samples = struct.unpack('<' + 'd' * nframes * nchannels, frames)
+        # Process samples (runs for BOTH paths)
+        samples = None  # Defensive initialization for Python scoping
+        if sampwidth == 1:
+            # 8-bit unsigned
+            samples = struct.unpack('<' + 'B' * nframes * nchannels, frames)
+            samples = [(s - 128) * 256 for s in samples]
+        elif sampwidth == 2:
+            # 16-bit signed
+            samples = struct.unpack('<' + 'h' * nframes * nchannels, frames)
+        elif sampwidth == 3:
+            # 24-bit signed (packed in 3 bytes)
+            raw = list(frames)
+            samples = []
+            for i in range(0, len(raw), 3):
+                if i + 2 < len(raw):
+                    val = raw[i] | (raw[i+1] << 8) | (raw[i+2] << 16)
+                    if val & 0x800000:
+                        val -= 0x1000000
+                    samples.append(val >> 8)  # Convert to 16-bit
+        elif sampwidth == 4:
+            if is_float:
+                # 32-bit float (-1.0 to 1.0)
+                samples = struct.unpack('<' + 'f' * nframes * nchannels, frames)
                 samples = [int(s * 32767) for s in samples]
             else:
-                raise ValueError(f"Unsupported sample width: {sampwidth} (comptype={comptype})")
+                # 32-bit signed int
+                samples = struct.unpack('<' + 'i' * nframes * nchannels, frames)
+                samples = [int(s / 65536) for s in samples]  # Convert to 16-bit
+        elif sampwidth == 8 and is_float:
+            # 64-bit float (rare)
+            samples = struct.unpack('<' + 'd' * nframes * nchannels, frames)
+            samples = [int(s * 32767) for s in samples]
+        else:
+            raise ValueError(f"Unsupported sample width: {sampwidth} (comptype={comptype})")
 
-            if nchannels == 2:
-                mono_samples = []
-                for i in range(0, len(samples), 2):
-                    if i + 1 < len(samples):
-                        mono_samples.append((samples[i] + samples[i+1]) // 2)
-                    else:
-                        mono_samples.append(samples[i])
-                samples = mono_samples
-            elif nchannels > 2:
-                mono_samples = []
-                for i in range(0, len(samples), nchannels):
-                    chunk = samples[i:i+nchannels]
-                    mono_samples.append(sum(chunk) // len(chunk))
-                samples = mono_samples
-
-            if len(samples) != target_samples:
-                if len(samples) == 0:
-                    samples = [0] * target_samples
+        # Convert to mono if stereo
+        if nchannels == 2:
+            mono_samples = []
+            for i in range(0, len(samples), 2):
+                if i + 1 < len(samples):
+                    mono_samples.append((samples[i] + samples[i+1]) // 2)
                 else:
-                    ratio = len(samples) / target_samples
-                    resampled = []
-                    for i in range(target_samples):
-                        src_idx = i * ratio
-                        idx_floor = int(src_idx)
-                        idx_ceil = min(idx_floor + 1, len(samples) - 1)
-                        frac = src_idx - idx_floor
-                        val = samples[idx_floor] * (1 - frac) + samples[idx_ceil] * frac
-                        resampled.append(int(val))
-                    samples = resampled
+                    mono_samples.append(samples[i])
+            samples = mono_samples
+        elif nchannels > 2:
+            mono_samples = []
+            for i in range(0, len(samples), nchannels):
+                chunk = samples[i:i+nchannels]
+                mono_samples.append(sum(chunk) // len(chunk))
+            samples = mono_samples
+
+        if len(samples) != target_samples:
+            if len(samples) == 0:
+                samples = [0] * target_samples
+            else:
+                ratio = len(samples) / target_samples
+                resampled = []
+                for i in range(target_samples):
+                    src_idx = i * ratio
+                    idx_floor = int(src_idx)
+                    idx_ceil = min(idx_floor + 1, len(samples) - 1)
+                    frac = src_idx - idx_floor
+                    val = samples[idx_floor] * (1 - frac) + samples[idx_ceil] * frac
+                    resampled.append(int(val))
+                samples = resampled
 
         return samples, sr
 
@@ -948,14 +958,29 @@ async function handleDropOnWavetable(e) {
   e.currentTarget.classList.remove('drag-over');
 
   const wtIndex = parseInt(e.currentTarget.dataset.index);
-  const file = e.dataTransfer.files[0];
-  if (!file || !file.name.toLowerCase().endsWith('.wav')) {
-    updateStatus('Please drop a .wav file');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.wav'));
+
+  if (files.length === 0) {
+    updateStatus('Please drop .wav file(s)');
     return;
   }
 
-  const newName = generateWavetableName(file.name);
-  await updateFullWavetable(wtIndex, file, newName);
+  // Process multiple files sequentially, starting at the drop target index
+  for (let i = 0; i < files.length; i++) {
+    const targetIndex = wtIndex + i;
+    if (targetIndex >= 64) {
+      updateStatus(`Stopped at wavetable 63 (max 64 wavetables)`);
+      break;
+    }
+    const file = files[i];
+    const newName = generateWavetableName(file.name);
+    await updateFullWavetable(targetIndex, file, newName);
+
+    // Small delay to allow UI updates between operations
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  updateStatus(`Loaded ${files.length} wavetable(s) starting at index ${wtIndex}`);
 }
 
 function handleDragOverFrame(e) {
@@ -979,13 +1004,28 @@ async function handleDropOnFrame(e, frameIdx) {
   e.stopPropagation();
   e.currentTarget.classList.remove('drag-over');
 
-  const file = e.dataTransfer.files[0];
-  if (!file || !file.name.toLowerCase().endsWith('.wav')) {
-    updateStatus('Please drop a .wav file');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.wav'));
+
+  if (files.length === 0) {
+    updateStatus('Please drop .wav file(s)');
     return;
   }
 
-  await updateSingleFrame(selectedWtIndex, frameIdx, file);
+  // Process multiple files sequentially, starting at the drop target frame index
+  for (let i = 0; i < files.length; i++) {
+    const targetFrameIdx = frameIdx + i;
+    if (targetFrameIdx >= 256) {
+      updateStatus(`Stopped at frame 255 (max 256 frames)`);
+      break;
+    }
+    const file = files[i];
+    await updateSingleFrame(selectedWtIndex, targetFrameIdx, file);
+
+    // Small delay to allow UI updates between operations
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  updateStatus(`Loaded ${files.length} frame(s) starting at index ${frameIdx}`);
 }
 
 // Drag-out (export) handlers
@@ -1318,7 +1358,7 @@ original_frames
     // Update the stored bytes for download
     systemCoreBytes = new Uint8Array(pyodide.FS.readFile('/SystemCore_modified.bin'));
 
-    updateStatus(result);
+    updateStatus(`Updated wavetable ${wtIndex} (${newName}) with sample rate ${sampleRate} Hz${framesInfo}`);
   } catch (err) {
     updateStatus(`Error: ${err.message}`);
     console.error(err);
