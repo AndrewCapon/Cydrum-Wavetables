@@ -20,3 +20,6 @@ bells.wav
 SingleSquare.wav
 __pycache__/cydrums_wavetable_tools.cpython-312.pyc
 strange.wav
+.claude/statusline-command.sh
+.claude/settings.json
+app copy.js

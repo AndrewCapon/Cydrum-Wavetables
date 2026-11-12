@@ -12,6 +12,28 @@ let draggedWtIndex = null;
 let draggedFrameIdx = null;
 let draggedFrameWtIndex = null;
 
+// Audio playback state
+let audioContext = null;
+let audioWorkletNode = null;
+let frameBufferCache = new Map(); // wtIndex -> SharedArrayBuffer
+let playbackState = {
+  isPlaying: false,
+  note: 60,
+  startFrame: 0,
+  endFrame: 255,
+  direction: 'forward',
+  scanSpeed: 1.0,
+  interpolation: true,
+  loop: true,
+  midiMonitor: false,
+  maxVoices: 8,
+  selectedMidiInput: null
+};
+
+// Web MIDI state
+let midiAccess = null;
+let midiInputs = new Map();
+
 // Pyodide initialization
 async function initPyodide() {
   updateStatus('Loading Pyodide runtime...');
@@ -579,6 +601,498 @@ function initTheme() {
   themeSelect.addEventListener('change', (e) => applyTheme(e.target.value));
 }
 
+// ===== Playback Controls =====
+
+function initPlaybackControls() {
+  // Populate note selector (MIDI 0-127, C-1 to G9)
+  const noteSelect = document.getElementById('note-select');
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  for (let note = 0; note <= 127; note++) {
+    const octave = Math.floor(note / 12) - 1;
+    const name = noteNames[note % 12];
+    const option = document.createElement('option');
+    option.value = note;
+    option.textContent = `${name}${octave} (${note})`;
+    if (note === 60) option.selected = true; // Middle C
+    noteSelect.appendChild(option);
+  }
+
+  // Load saved playback settings from localStorage
+  loadPlaybackSettings();
+
+  // Apply loaded settings to UI
+  applyPlaybackSettingsToUI();
+
+  // Event listeners
+  const playbackToggle = document.getElementById('playback-toggle');
+  const playbackControls = document.getElementById('playback-controls');
+  const playBtn = document.getElementById('play-btn');
+  const stopBtn = document.getElementById('stop-btn');
+  const startFrame = document.getElementById('start-frame');
+  const endFrame = document.getElementById('end-frame');
+  const directionSelect = document.getElementById('direction-select');
+  const scanSpeedSelect = document.getElementById('scan-speed-select');
+  const interpolationCheckbox = document.getElementById('interpolation-checkbox');
+  const loopCheckbox = document.getElementById('loop-checkbox');
+  const midiInputSelect = document.getElementById('midi-input-select');
+  const midiMonitorCheckbox = document.getElementById('midi-monitor-checkbox');
+  const maxVoicesInput = document.getElementById('max-voices');
+
+  // Toggle panel collapse/expand
+  playbackToggle.addEventListener('click', () => {
+    const expanded = playbackToggle.getAttribute('aria-expanded') === 'true';
+    playbackToggle.setAttribute('aria-expanded', !expanded);
+    playbackControls.hidden = expanded;
+    playbackToggle.textContent = expanded ? 'Playback ▼' : 'Playback ▲';
+  });
+
+  // Play button
+  playBtn.addEventListener('click', async () => {
+    await startMonophonicPlayback();
+  });
+
+  // Stop button
+  stopBtn.addEventListener('click', () => {
+    stopPlayback();
+  });
+
+  // Note selector
+  noteSelect.addEventListener('change', (e) => {
+    playbackState.note = parseInt(e.target.value);
+    updateFrequencyDisplay();
+    savePlaybackSettings();
+  });
+
+  // Frame range
+  startFrame.addEventListener('change', (e) => {
+    let val = Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
+    if (val > playbackState.endFrame) val = playbackState.endFrame;
+    playbackState.startFrame = val;
+    e.target.value = val;
+    savePlaybackSettings();
+    if (playbackState.isPlaying) {
+      updateAudioWorkletParams();
+    }
+    updatePlayButtonState();
+  });
+
+  endFrame.addEventListener('change', (e) => {
+    let val = Math.max(0, Math.min(255, parseInt(e.target.value) || 255));
+    if (val < playbackState.startFrame) val = playbackState.startFrame;
+    playbackState.endFrame = val;
+    e.target.value = val;
+    savePlaybackSettings();
+    if (playbackState.isPlaying) {
+      updateAudioWorkletParams();
+    }
+    updatePlayButtonState();
+  });
+
+  // Direction
+  directionSelect.addEventListener('change', (e) => {
+    playbackState.direction = e.target.value;
+    savePlaybackSettings();
+    if (playbackState.isPlaying || playbackState.midiMonitor) {
+      updateAudioWorkletParams();
+    }
+  });
+
+  // Scan speed
+  scanSpeedSelect.addEventListener('change', (e) => {
+    playbackState.scanSpeed = parseFloat(e.target.value);
+    savePlaybackSettings();
+    if (playbackState.isPlaying || playbackState.midiMonitor) {
+      updateAudioWorkletParams();
+    }
+  });
+
+  // Interpolation
+  interpolationCheckbox.addEventListener('change', (e) => {
+    playbackState.interpolation = e.target.checked;
+    savePlaybackSettings();
+    if (playbackState.isPlaying || playbackState.midiMonitor) {
+      updateAudioWorkletParams();
+    }
+  });
+
+  // Loop
+  loopCheckbox.addEventListener('change', (e) => {
+    playbackState.loop = e.target.checked;
+    savePlaybackSettings();
+    if (playbackState.isPlaying || playbackState.midiMonitor) {
+      updateAudioWorkletParams();
+    }
+  });
+
+  // MIDI input select
+  midiInputSelect.addEventListener('change', (e) => {
+    playbackState.selectedMidiInput = e.target.value || null;
+    savePlaybackSettings();
+    if (playbackState.midiMonitor) {
+      setupMIDIInput();
+    }
+  });
+
+  // MIDI monitor
+  midiMonitorCheckbox.addEventListener('change', async (e) => {
+    playbackState.midiMonitor = e.target.checked;
+    savePlaybackSettings();
+    if (e.target.checked) {
+      await enableMIDIMonitor();
+    } else {
+      disableMIDIMonitor();
+    }
+    updatePlayButtonState();
+  });
+
+  // Max voices
+  maxVoicesInput.addEventListener('change', (e) => {
+    let val = Math.max(1, Math.min(32, parseInt(e.target.value) || 8));
+    playbackState.maxVoices = val;
+    e.target.value = val;
+    savePlaybackSettings();
+    if (audioWorkletNode) {
+      audioWorkletNode.port.postMessage({ type: 'setMaxVoices', maxVoices: val });
+    }
+  });
+
+  // Initialize Web MIDI API
+  initWebMIDI();
+}
+
+function loadPlaybackSettings() {
+  try {
+    const saved = localStorage.getItem('playbackSettings');
+    if (saved) {
+      const settings = JSON.parse(saved);
+      Object.assign(playbackState, settings);
+    }
+  } catch (e) {
+    console.warn('Failed to load playback settings:', e);
+  }
+}
+
+function savePlaybackSettings() {
+  try {
+    // Don't save MIDI input selection as it may change between sessions
+    const { selectedMidiInput, midiMonitor, ...settingsToSave } = playbackState;
+    localStorage.setItem('playbackSettings', JSON.stringify(settingsToSave));
+  } catch (e) {
+    console.warn('Failed to save playback settings:', e);
+  }
+}
+
+function applyPlaybackSettingsToUI() {
+  document.getElementById('note-select').value = playbackState.note;
+  document.getElementById('start-frame').value = playbackState.startFrame;
+  document.getElementById('end-frame').value = playbackState.endFrame;
+  document.getElementById('direction-select').value = playbackState.direction;
+  document.getElementById('scan-speed-select').value = playbackState.scanSpeed;
+  document.getElementById('interpolation-checkbox').checked = playbackState.interpolation;
+  document.getElementById('loop-checkbox').checked = playbackState.loop;
+  document.getElementById('midi-monitor-checkbox').checked = playbackState.midiMonitor;
+  document.getElementById('max-voices').value = playbackState.maxVoices;
+  updateFrequencyDisplay();
+  updatePlayButtonState();
+}
+
+function updateFrequencyDisplay() {
+  const freq = 440 * Math.pow(2, (playbackState.note - 69) / 12);
+  document.getElementById('freq-display').textContent = `${freq.toFixed(2)} Hz`;
+}
+
+function updatePlayButtonState() {
+  const playBtn = document.getElementById('play-btn');
+  const stopBtn = document.getElementById('stop-btn');
+  const hasWavetable = selectedWtIndex !== null;
+  const frameRangeValid = playbackState.startFrame <= playbackState.endFrame;
+  const canPlay = hasWavetable && frameRangeValid && !playbackState.midiMonitor;
+
+  if (playbackState.isPlaying) {
+    playBtn.hidden = true;
+    stopBtn.hidden = false;
+    playBtn.disabled = true;
+  } else {
+    playBtn.hidden = false;
+    stopBtn.hidden = true;
+    playBtn.disabled = !canPlay;
+  }
+
+  // Disable frame inputs during playback
+  document.getElementById('start-frame').disabled = playbackState.isPlaying;
+  document.getElementById('end-frame').disabled = playbackState.isPlaying;
+  document.getElementById('direction-select').disabled = playbackState.isPlaying;
+  document.getElementById('scan-speed-select').disabled = playbackState.isPlaying;
+  document.getElementById('interpolation-checkbox').disabled = playbackState.isPlaying;
+  document.getElementById('loop-checkbox').disabled = playbackState.isPlaying;
+}
+
+async function startMonophonicPlayback() {
+  if (selectedWtIndex === null) return;
+  if (playbackState.startFrame > playbackState.endFrame) return;
+
+  // Ensure AudioContext is running
+  await ensureAudioContext();
+
+  // Load frames for selected wavetable if not cached
+  await loadFramesForPlayback(selectedWtIndex);
+
+  // Start playback using voice 0 (monophonic)
+  if (audioWorkletNode) {
+    audioWorkletNode.port.postMessage({
+      type: 'noteOn',
+      note: playbackState.note,
+      velocity: 1.0
+    });
+  }
+
+  playbackState.isPlaying = true;
+  updatePlayButtonState();
+  updateStatus(`Playing note ${playbackState.note} (${440 * Math.pow(2, (playbackState.note - 69) / 12).toFixed(2)} Hz)`);
+}
+
+function stopPlayback() {
+  if (audioWorkletNode) {
+    audioWorkletNode.port.postMessage({ type: 'stopAll' });
+  }
+  playbackState.isPlaying = false;
+  updatePlayButtonState();
+  updateStatus('Playback stopped');
+}
+
+async function ensureAudioContext() {
+  if (!audioContext) {
+    audioContext = new AudioContext();
+    // Register the AudioWorklet
+    await audioContext.audioWorklet.addModule('wavetable-processor.js');
+    audioWorkletNode = new AudioWorkletNode(audioContext, 'wavetable-processor', {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [2]
+    });
+    audioWorkletNode.connect(audioContext.destination);
+
+    // Set max voices
+    audioWorkletNode.port.postMessage({ type: 'setMaxVoices', maxVoices: playbackState.maxVoices });
+  }
+
+  // Resume if suspended (browser autoplay policy)
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume();
+  }
+}
+
+async function loadFramesForPlayback(wtIndex) {
+  // Check cache first
+  if (frameBufferCache.has(wtIndex)) {
+    const cached = frameBufferCache.get(wtIndex);
+    sendFramesToAudioWorklet(cached, wtIndex);
+    return;
+  }
+
+  updateStatus('Loading frames for playback...');
+
+  // Get frames from Python
+  const frames = extractor.get_frames(wtIndex).toJs();
+  const wtInfo = extractor.list_wavetables().toJs()[wtIndex];
+  const sampleRate = wtInfo.sample_rate;
+
+  const numFrames = frames.length;
+  const frameLen = frames[0].length;
+  const totalSamples = numFrames * frameLen;
+
+  // Create SharedArrayBuffer for zero-copy transfer to AudioWorklet
+  const sharedBuffer = new SharedArrayBuffer(totalSamples * 4); // Float32 = 4 bytes
+  const float32View = new Float32Array(sharedBuffer);
+
+  // Convert int16 to Float32 [-1, 1]
+  for (let f = 0; f < numFrames; f++) {
+    const frame = frames[f];
+    const offset = f * frameLen;
+    for (let i = 0; i < frameLen; i++) {
+      float32View[offset + i] = frame[i] / 32768.0;
+    }
+  }
+
+  // Cache for future use
+  frameBufferCache.set(wtIndex, {
+    buffer: sharedBuffer,
+    numFrames,
+    frameLen,
+    sampleRate
+  });
+
+  sendFramesToAudioWorklet(frameBufferCache.get(wtIndex), wtIndex);
+
+  updateStatus(`Loaded ${numFrames} frames for playback`);
+}
+
+function sendFramesToAudioWorklet(cached, wtIndex) {
+  if (!audioWorkletNode) return;
+
+  const { buffer, numFrames, frameLen, sampleRate } = cached;
+  // Send SharedArrayBuffer directly - it's shared memory, no transfer needed
+  // Create a view for the message data
+  const float32View = new Float32Array(buffer);
+
+  audioWorkletNode.port.postMessage({
+    type: 'loadFrames',
+    frameData: float32View,  // Float32Array view on SharedArrayBuffer
+    numFrames,
+    frameLen,
+    sampleRate,
+    frameRange: { start: playbackState.startFrame, end: playbackState.endFrame },
+    direction: playbackState.direction,
+    scanSpeed: playbackState.scanSpeed,
+    interpolation: playbackState.interpolation,
+    loop: playbackState.loop
+  });
+  // No transfer array needed - SharedArrayBuffer is shared memory
+}
+
+function updateAudioWorkletParams() {
+  if (!audioWorkletNode) return;
+
+  audioWorkletNode.port.postMessage({
+    type: 'setParams',
+    frameRange: { start: playbackState.startFrame, end: playbackState.endFrame },
+    direction: playbackState.direction,
+    scanSpeed: playbackState.scanSpeed,
+    interpolation: playbackState.interpolation,
+    loop: playbackState.loop
+  });
+}
+
+// ===== Web MIDI API =====
+
+async function initWebMIDI() {
+  if (!navigator.requestMIDIAccess) {
+    updateStatus('Web MIDI API not supported in this browser');
+    document.getElementById('midi-input-select').disabled = true;
+    document.getElementById('midi-monitor-checkbox').disabled = true;
+    return;
+  }
+
+  try {
+    midiAccess = await navigator.requestMIDIAccess();
+    updateMIDIDeviceList();
+
+    // Listen for device connect/disconnect
+    midiAccess.onstatechange = (e) => {
+      updateMIDIDeviceList();
+    };
+
+    updateStatus('Web MIDI API ready');
+  } catch (err) {
+    console.warn('Web MIDI API access denied:', err);
+    updateStatus('MIDI access denied - enable in browser settings');
+    document.getElementById('midi-input-select').disabled = true;
+    document.getElementById('midi-monitor-checkbox').disabled = true;
+  }
+}
+
+function updateMIDIDeviceList() {
+  if (!midiAccess) return;
+
+  const select = document.getElementById('midi-input-select');
+  const currentValue = select.value;
+
+  // Clear and repopulate
+  select.innerHTML = '<option value="">None</option>';
+
+  midiInputs.clear();
+  for (const input of midiAccess.inputs.values()) {
+    midiInputs.set(input.id, input);
+    const option = document.createElement('option');
+    option.value = input.id;
+    option.textContent = input.name || `MIDI Input ${input.id.slice(0, 8)}`;
+    select.appendChild(option);
+  }
+
+  // Restore selection if still valid
+  if (currentValue && midiInputs.has(currentValue)) {
+    select.value = currentValue;
+    playbackState.selectedMidiInput = currentValue;
+  } else if (playbackState.selectedMidiInput && midiInputs.has(playbackState.selectedMidiInput)) {
+    select.value = playbackState.selectedMidiInput;
+  } else {
+    playbackState.selectedMidiInput = null;
+  }
+}
+
+async function enableMIDIMonitor() {
+  await ensureAudioContext();
+
+  const inputId = playbackState.selectedMidiInput;
+  if (!inputId || !midiInputs.has(inputId)) {
+    updateStatus('No MIDI input selected');
+    document.getElementById('midi-monitor-checkbox').checked = false;
+    playbackState.midiMonitor = false;
+    updatePlayButtonState();
+    return;
+  }
+
+  const input = midiInputs.get(inputId);
+
+  // Remove any existing listener
+  input.onmidimessage = null;
+
+  // Set up MIDI message handler
+  input.onmidimessage = handleMIDIMessage;
+
+  // Load frames and send parameters if not already done
+  if (selectedWtIndex !== null && audioWorkletNode) {
+    await loadFramesForPlayback(selectedWtIndex);
+  }
+
+  updateStatus(`MIDI Monitor enabled: ${input.name}`);
+  updatePlayButtonState();
+}
+
+function disableMIDIMonitor() {
+  // Remove MIDI listeners
+  for (const input of midiInputs.values()) {
+    input.onmidimessage = null;
+  }
+
+  // Stop all voices
+  if (audioWorkletNode) {
+    audioWorkletNode.port.postMessage({ type: 'stopAll' });
+  }
+
+  updateStatus('MIDI Monitor disabled');
+  updatePlayButtonState();
+}
+
+function handleMIDIMessage(event) {
+  const [status, note, velocity] = event.data;
+  const channel = status & 0x0F;
+  const command = status & 0xF0;
+
+  // Only handle channel 0 (or all channels if you prefer)
+  // Note On: 0x90-0x9F with velocity > 0
+  // Note Off: 0x80-0x8F or 0x90-0x9F with velocity = 0
+  if (command === 0x90 && velocity > 0) {
+    // Note On
+    const normVelocity = velocity / 127;
+    if (audioWorkletNode) {
+      audioWorkletNode.port.postMessage({
+        type: 'noteOn',
+        note: note,
+        velocity: normVelocity
+      });
+    }
+  } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
+    // Note Off
+    if (audioWorkletNode) {
+      audioWorkletNode.port.postMessage({
+        type: 'noteOff',
+        note: note
+      });
+    }
+  }
+}
+
 // Event Listeners
 fileInput.addEventListener('change', handleFileLoad);
 downloadBtn.addEventListener('click', handleDownload);
@@ -588,6 +1102,9 @@ addContextMenuExport();
 
 // Initialize theme
 initTheme();
+
+// Initialize playback controls
+initPlaybackControls();
 
 // Initialize
 initPyodide();
@@ -616,6 +1133,7 @@ function handleFileLoad(e) {
       renderWavetableList();
       selectWavetable(0);  // Auto-select first wavetable
       downloadBtn.disabled = false;
+      updatePlayButtonState();  // Ensure play button state is correct after load
       updateStatus(`Loaded ${file.name} - 64 wavetables ready`);
     } catch (err) {
       updateStatus(`Error: ${err.message}`);
@@ -690,6 +1208,39 @@ function selectWavetable(index) {
     }, 0);
   });
 }
+
+// ===== Wavetable Selection Integration =====
+
+// Override selectWavetable to update playback button state
+const originalSelectWavetable = selectWavetable;
+selectWavetable = async function(index) {
+  // Stop playback if switching wavetables
+  const wasPlaying = playbackState.isPlaying;
+  const wasMonitoring = playbackState.midiMonitor;
+  if ((wasPlaying || wasMonitoring) && index !== selectedWtIndex) {
+    stopPlayback();
+    if (wasMonitoring) {
+      disableMIDIMonitor();
+    }
+  }
+  await originalSelectWavetable(index);
+  updatePlayButtonState();
+
+  // If playing or monitoring, reload frames for new wavetable
+  if (wasPlaying) {
+    await loadFramesForPlayback(index);
+    await startMonophonicPlayback();
+  } else if (wasMonitoring) {
+    await enableMIDIMonitor();
+  }
+};
+
+// Cleanup AudioContext on page unload
+window.addEventListener('beforeunload', () => {
+  if (audioContext && audioContext.state !== 'closed') {
+    audioContext.close();
+  }
+});
 
 async function renderFrames(wtIndex) {
   // Yield to event loop first to let selection UI paint

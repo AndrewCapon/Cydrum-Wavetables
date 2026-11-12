@@ -28,6 +28,69 @@
           <option value="dark">🌙 Dark</option>
         </select>
       </div>
+
+      <!-- Playback Controls Panel -->
+      <div id="playback-panel" class="playback-panel">
+        <button id="playback-toggle" class="playback-toggle" aria-expanded="false" aria-controls="playback-controls">
+          Playback ▼
+        </button>
+        <div id="playback-controls" class="playback-controls" hidden>
+          <div class="playback-row">
+            <button id="play-btn" class="btn-play" disabled title="Play monophonic preview">▶ Play</button>
+            <button id="stop-btn" class="btn-stop" disabled title="Stop playback" hidden>■ Stop</button>
+            <label for="note-select">Note:</label>
+            <select id="note-select" title="MIDI note for playback (C-1 to G9)">
+              <!-- Options populated by JS -->
+            </select>
+            <span id="freq-display" class="freq-display">261.63 Hz</span>
+          </div>
+          <div class="playback-row">
+            <label for="start-frame">Start Frame:</label>
+            <input type="number" id="start-frame" min="0" max="255" value="0" title="Start frame (0-255)">
+            <label for="end-frame">End Frame:</label>
+            <input type="number" id="end-frame" min="0" max="255" value="255" title="End frame (0-255)">
+            <label for="direction-select">Direction:</label>
+            <select id="direction-select" title="Playback direction">
+              <option value="forward">Forward</option>
+              <option value="backward">Backward</option>
+              <option value="forward-backward">Forward → Backward</option>
+              <option value="backward-forward">Backward → Forward</option>
+            </select>
+          </div>
+          <div class="playback-row">
+            <label for="scan-speed-select">Scan Speed:</label>
+            <select id="scan-speed-select" title="Wavetable scan speed">
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+              <option value="8">8x</option>
+            </select>
+            <label class="checkbox-label">
+              <input type="checkbox" id="interpolation-checkbox" checked title="Interpolate between frames">
+              Interpolation
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="loop-checkbox" checked title="Loop playback">
+              Loop
+            </label>
+          </div>
+          <div class="playback-row midi-row">
+            <label for="midi-input-select">MIDI Input:</label>
+            <select id="midi-input-select" title="MIDI input device for polyphonic playback">
+              <option value="">None</option>
+              <!-- Options populated by Web MIDI API -->
+            </select>
+            <label class="checkbox-label">
+              <input type="checkbox" id="midi-monitor-checkbox" title="Enable MIDI monitor mode (polyphonic)">
+              Monitor
+            </label>
+            <label for="max-voices">Voices:</label>
+            <input type="number" id="max-voices" min="1" max="32" value="8" title="Maximum polyphony (1-32)">
+          </div>
+        </div>
+      </div>
     </header>
     <main>
       <aside id="wavetable-list" class="panel">
